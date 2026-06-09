@@ -1,5 +1,14 @@
 #pragma once
 
+#ifdef USE_OPENAL
+#include "dr_mp3.h"
+#include "dr_wav.h"
+#include <AL/al.h>
+#include <AL/alc.h>
+#define NUM_STREAM_BUFFERS 4
+#define STREAM_BUFFER_SIZE 65536 // 64KB chunk size
+#endif
+
 #include <msslib/mss.h>
 #include "snd_public.h"
 
@@ -68,6 +77,37 @@ struct MssEqInfo // sizeof=0xF00
 
 typedef struct _SAMPLE FAR *HSAMPLE;           // Handle to sample
 
+#ifdef USE_OPENAL
+
+// Represents a single streamed audio channel
+struct OalStream {
+    ALuint source;
+    ALuint buffers[NUM_STREAM_BUFFERS];
+    
+    char filename[256];
+    int fileHandle;        // Engine VFS handle
+    int dataStartOffset;   // Where the PCM data begins after the WAV header
+    int dataBytesLeft;     // Bytes remaining in the file
+    int dataLength;        // Total bytes of PCM data
+    drmp3 mp3Decoder;
+    drwav wavDecoder;
+    int streamType;        // 0 = Empty, 1 = MP3, 2 = WAV/ADPCM
+    
+    ALenum format;
+    int rate;
+    bool isLooping;
+    bool active;
+};
+
+// We need a global struct for OpenAL state to replace milesGlob hardware pointers
+struct OalLocal {
+    ALCdevice* device;
+    ALCcontext* context;
+    ALuint sources[40];       // Replaces milesGlob.handle_sample (max_2D + max_3D)
+    OalStream streams[13]; // Replaces milesGlob.handle_stream
+    bool isMultiChannel;
+};
+#endif
 struct MssLocal // sizeof=0x26D0
 {                                       // ...
     _DIG_DRIVER *driver;                // ...

@@ -70,17 +70,27 @@ target_link_directories(${PROJECT_NAME} PUBLIC "${DEPS_DIR}/msslib")
 target_link_directories(${PROJECT_NAME} PUBLIC "${DEPS_DIR}/steamsdk")
 target_link_directories(${PROJECT_NAME} PUBLIC "${DEPS_DIR}/binklib")
 
+# Conditionally link MSS directories
+if(NOT USE_OPENAL)
+    target_link_directories(${PROJECT_NAME} PUBLIC "${DEPS_DIR}/msslib")
+else()
+    # Explicitly force the compiler to look in the OpenAL include folder
+    target_include_directories(${PROJECT_NAME} PUBLIC "${DEPS_DIR}/openal/include")
+    
+    # Explicitly force the linker to look in the OpenAL lib folder
+    target_link_directories(${PROJECT_NAME} PUBLIC "${DEPS_DIR}/openal/libs/Win32")
+endif()
+
 #Enable PDB for "Release" Build. (There is also RelWithDebInfo, but it has different settings)
 target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/DEBUG>")
 target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/OPT:REF>")
 target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/OPT:ICF>")
 
-target_link_options(${PROJECT_NAME} PRIVATE /machine:x86)
+target_link_options(${PROJECT_NAME} PRIVATE /machine:x86 /SAFESEH:NO)
 set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC
-        mss32.lib
-        dsound.lib
+# Create a variable to hold our libraries
+set(KISAK_LIBS
         ${D3DX_LIB}
         d3d9.lib
         ddraw.lib
@@ -102,6 +112,17 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
         steam_api.lib
         dxguid.lib
 )
+
+if(USE_OPENAL)
+    # Link OpenAL
+    list(APPEND KISAK_LIBS ${OPENAL_LIBRARY} dsound.lib)
+else()
+    # Link legacy MSS
+    list(APPEND KISAK_LIBS mss32.lib dsound.lib)
+endif()
+
+# Finally, link the target
+target_link_libraries(${PROJECT_NAME} PUBLIC ${KISAK_LIBS})
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 

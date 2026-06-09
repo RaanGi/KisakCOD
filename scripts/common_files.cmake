@@ -464,15 +464,28 @@ set(SERVER
     "${SRC_DIR}/server/sv_world.h"
 )
 
-set(SOUND
-    "${SRC_DIR}/sound/snd.cpp"
-    "${SRC_DIR}/sound/snd_driver.cpp"
-    "${SRC_DIR}/sound/snd_driver_load_obj.cpp"
-    "${SRC_DIR}/sound/snd_local.h"
-    "${SRC_DIR}/sound/snd_mss.cpp"
-    "${SRC_DIR}/sound/snd_public.h"
-    "${SRC_DIR}/sound/snd_utils.cpp"
-)
+if(USE_OPENAL)
+    set(SOUND
+        "${SRC_DIR}/sound/snd.cpp"
+        "${SRC_DIR}/sound/snd_driver_openal.cpp"
+        "${SRC_DIR}/sound/snd_mp3_impl.c"
+        "${SRC_DIR}/sound/snd_wav_impl.c"
+        "${SRC_DIR}/sound/snd_driver_load_obj.cpp"
+        "${SRC_DIR}/sound/snd_local.h"
+        "${SRC_DIR}/sound/snd_public.h"
+        "${SRC_DIR}/sound/snd_utils.cpp"
+    )
+else()
+    set(SOUND
+        "${SRC_DIR}/sound/snd.cpp"
+        "${SRC_DIR}/sound/snd_driver.cpp"
+        "${SRC_DIR}/sound/snd_driver_load_obj.cpp"
+        "${SRC_DIR}/sound/snd_local.h"
+        "${SRC_DIR}/sound/snd_mss.cpp"
+        "${SRC_DIR}/sound/snd_public.h"
+        "${SRC_DIR}/sound/snd_utils.cpp"
+    )
+endif()
 
 set(SPEEX
     "${DEPS_DIR}/speex/speex.h"

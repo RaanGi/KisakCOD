@@ -4842,14 +4842,34 @@ double __cdecl SND_GetVolumeNormalized()
 
 void __cdecl SND_SetHWND(HWND hwnd)
 {
+#ifndef USE_OPENAL
     if (g_snd.Initialized2d)
         AIL_set_DirectSound_HWND(milesGlob.driver, hwnd);
+#endif
 }
 
 void __cdecl SND_SetData(MssSoundCOD4 *mssSound, void *srcData)
 {
-    // KISAKTODO: double check MssSound struct usage here. It looks 'okay' at first glance
+#ifdef USE_OPENAL
+    if (!mssSound || !srcData || mssSound->info.data_len <= 0) return;
 
+    // 1. Map the engine's audio format to OpenAL standard formats
+    ALenum format = AL_FORMAT_MONO16; // Safe default
+    if (mssSound->info.channels == 1 && mssSound->info.bits == 8)  format = AL_FORMAT_MONO8;
+    else if (mssSound->info.channels == 1 && mssSound->info.bits == 16) format = AL_FORMAT_MONO16;
+    else if (mssSound->info.channels == 2 && mssSound->info.bits == 8)  format = AL_FORMAT_STEREO8;
+    else if (mssSound->info.channels == 2 && mssSound->info.bits == 16) format = AL_FORMAT_STEREO16;
+
+    // 2. Generate the hardware buffer and upload the raw PCM data
+    alGenBuffers(1, &mssSound->oalBuffer);
+    alBufferData(mssSound->oalBuffer, format, srcData, mssSound->info.data_len, mssSound->info.rate);
+    
+    // Note: We do not need to set mssSound->info.data_ptr for OpenAL, 
+    // because the hardware audio driver has taken full ownership of the buffer.
+
+#else // ORIGINAL MILES SOUND SYSTEM LOGIC BELOW
+
+    // KISAKTODO: double check MssSound struct usage here. It looks 'okay' at first glance
     _AILMIXINFO mixinfo; // [esp+Ch] [ebp-80h] BYREF
     int digitalFormat; // [esp+88h] [ebp-4h]
 
@@ -4895,6 +4915,8 @@ void __cdecl SND_SetData(MssSoundCOD4 *mssSound, void *srcData)
     }
     mssSound->info.data_ptr = mssSound->data;
     mssSound->info.initial_ptr = mssSound->data;
+
+#endif
 }
 
 #ifdef KISAK_SP

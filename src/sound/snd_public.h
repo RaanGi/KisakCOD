@@ -82,7 +82,15 @@ struct snd_listener // sizeof=0x38
 struct MssSoundCOD4 // sizeof=0x28
 {
     _AILSOUNDINFO_COD4 info;
-    uint8_t *data;
+    // Use an anonymous union to share this 4-byte block.
+    // This keeps the struct exactly at 40 bytes (44 bytes total for LoadedSound)
+    // passing the static_assert perfectly.
+    union {
+        uint8_t* data;          // Used by MSS to hold the PCM pointer
+#ifdef USE_OPENAL
+        unsigned int oalBuffer; // Used by OpenAL to hold the ALuint hardware ID
+#endif
+    };
 };
 // LWSS END
 //struct MssSound // sizeof=0x2C

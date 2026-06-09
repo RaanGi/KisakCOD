@@ -11,6 +11,22 @@ set(CMAKE_CXX_STANDARD 20)
 # C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Tools\MSVC\14.44.35207\bin\Hostx86\x86
 set(USE_ASAN OFF)
 
+# ==========================================
+# PHASE 1 PORTING TARGETS
+# ==========================================
+option(USE_OPENAL "Use OpenAL instead of proprietary Miles Sound System" ON)
+
+if(USE_OPENAL)
+    message(STATUS "AUDIO: Compiling with OpenAL backend.")
+    add_definitions(-DUSE_OPENAL)
+    
+    # Point directly to our local deps folder instead of searching the host OS
+    set(OPENAL_INCLUDE_DIR "${DEPS_DIR}/openal/include")
+    set(OPENAL_LIBRARY_DIR "${DEPS_DIR}/openal/lib/Win32")
+    set(OPENAL_LIBRARY "OpenAL32.lib")
+endif()
+# ==========================================
+
 # Set the gloabl directory variables
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(DEPS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps)
