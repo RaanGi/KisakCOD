@@ -171,7 +171,7 @@ void __cdecl Touch_Item(gentity_s *ent, gentity_s *other, int32_t touched)
                         G_AddEvent(other, pickupEvent, weapIndex);
                     if (pickedUp)
                     {
-                        if (ent->s.eType == ET_ITEM)
+                        if (ent->s.eType == ET_MISSILE)
                             Scr_Notify(ent, scr_const.death, 0);
                         G_FreeEntity(ent);
                     }
@@ -302,7 +302,7 @@ LABEL_12:
         {
             droppedEnt->spawnflags = ent->spawnflags & 0xFFFFFFFE;
             droppedEnt->s.groundEntityNum = ent->s.groundEntityNum;
-            if ((droppedEnt->flags & 0x1000) != 0 && ent->tagInfo && ent->tagInfo->parent)
+            if ((droppedEnt->flags & FL_SUPPORTS_LINKTO) != 0 && ent->tagInfo && ent->tagInfo->parent)
             {
                 G_SetOrigin(droppedEnt, ent->r.currentOrigin);
                 G_SetAngle(droppedEnt, ent->r.currentAngles);
@@ -466,15 +466,15 @@ void __cdecl PrintPlayerPickupMessage(gentity_s *player, uint32_t weapIdx, Weapo
 
 #ifdef KISAK_MP
     if (BG_WeaponIsClipOnly(weapIdx))
-        text = va("%c \"GAME_PICKUP_CLIPONLY_AMMO %s\"", 'f', weapDef->szDisplayName);
+        text = va("%c \"GAME_PICKUP_CLIPONLY_AMMO\x15%s\"", 'f', weapDef->szDisplayName);
     else
-        text = va("%c \"GAME_PICKUP_AMMO %s\"", 'f', weapDef->szDisplayName);
+        text = va("%c \"GAME_PICKUP_AMMO\x15%s\"", 'f', weapDef->szDisplayName);
     SV_GameSendServerCommand(player - g_entities, SV_CMD_CAN_IGNORE, text);
 #elif KISAK_SP
     if (BG_WeaponIsClipOnly(weapIdx))
-        text = va("gm \"GAME_PICKUP_CLIPONLY_AMMO %s\"", weapDef->szDisplayName);
+        text = va("gm \"GAME_PICKUP_CLIPONLY_AMMO\x15%s\"", weapDef->szDisplayName);
     else
-        text = va("gm \"GAME_PICKUP_AMMO %s\"", weapDef->szDisplayName);
+        text = va("gm \"GAME_PICKUP_AMMO\x15%s\"", weapDef->szDisplayName);
     SV_GameSendServerCommand(player - g_entities, text);
 #endif
 }
@@ -581,7 +581,7 @@ void __cdecl PrintMessage_CannotGrabItem(gentity_s *ent, gentity_s *player, int3
             if (Com_BitCheckAssert(ps->ps.weapons, weapIndex, 16))
             {
                 WeaponDef = BG_GetWeaponDef(weapIndex);
-                v6 = va("%c \"GAME_PICKUP_CANTCARRYMOREAMMO", 102, WeaponDef->szDisplayName);
+                v6 = va("%c \"GAME_PICKUP_CANTCARRYMOREAMMO\x15%s\"", 102, WeaponDef->szDisplayName);
             }
             else
             {
@@ -593,7 +593,7 @@ void __cdecl PrintMessage_CannotGrabItem(gentity_s *ent, gentity_s *player, int3
             if (BG_PlayerHasWeapon(&player->client->ps, weapIndex))
             {
                 WeaponDef = BG_GetWeaponDef(weapIndex);
-                v10 = va("gm \"GAME_PICKUP_CANTCARRYMOREAMMO %s\"", WeaponDef->szDisplayName);
+                v10 = va("gm \"GAME_PICKUP_CANTCARRYMOREAMMO\x15%s\"", WeaponDef->szDisplayName);
             }
             else
             {
@@ -771,7 +771,7 @@ int32_t __cdecl GetFreeDropCueIdx()
             return i;
 
         ent = level.droppedWeaponCue[i].ent();
-        if ((ent->flags & 0x1000000) == 0)
+        if ((ent->flags & FL_WEAPON_BEING_GRABBED) == 0)
         {
             if (bg_itemlist[ent->s.index.brushmodel].giType != IT_WEAPON)
                 MyAssertHandler(".\\game\\g_items.cpp", 670, 0, "%s", "bg_itemlist[ ent->s.index.item ].giType == IT_WEAPON");
