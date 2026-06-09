@@ -87,6 +87,44 @@ char __cdecl SND_InitDriver()
 
     alDistanceModel(AL_LINEAR_DISTANCE_CLAMPED);
 
+    if (alcIsExtensionPresent(oalGlob.device, "ALC_EXT_EFX")) {
+        oalGlob.efxSupported = true;
+        
+        // 2. Load Function Pointers
+        alGenAuxiliaryEffectSlots = (LPALGENAUXILIARYEFFECTSLOTS)alGetProcAddress("alGenAuxiliaryEffectSlots");
+        alDeleteAuxiliaryEffectSlots = (LPALDELETEAUXILIARYEFFECTSLOTS)alGetProcAddress("alDeleteAuxiliaryEffectSlots");
+        alGenEffects = (LPALGENEFFECTS)alGetProcAddress("alGenEffects");
+        alDeleteEffects = (LPALDELETEEFFECTS)alGetProcAddress("alDeleteEffects");
+        alAuxiliaryEffectSloti = (LPALAUXILIARYEFFECTSLOTI)alGetProcAddress("alAuxiliaryEffectSloti");
+        alEffecti = (LPALEFFECTI)alGetProcAddress("alEffecti");
+        alEffectf = (LPALEFFECTF)alGetProcAddress("alEffectf");
+        alGenFilters = (LPALGENFILTERS)alGetProcAddress("alGenFilters");
+        alFilteri = (LPALFILTERI)alGetProcAddress("alFilteri");
+        alFilterf = (LPALFILTERF)alGetProcAddress("alFilterf");
+        alDeleteFilters = (LPALDELETEFILTERS)alGetProcAddress("alDeleteFilters");
+
+        // 3. Generate Hardware DSP Busses (One for each entchannel)
+        alGenAuxiliaryEffectSlots(64, oalGlob.eqAuxSlots);
+        alGenEffects(64, oalGlob.eqEffects);
+
+        alGenFilters(1, &oalGlob.muteFilter);
+        alFilteri(oalGlob.muteFilter, AL_FILTER_TYPE, AL_FILTER_LOWPASS);
+        alFilterf(oalGlob.muteFilter, AL_LOWPASS_GAIN, 0.0f); // 0 volume = completely muted
+
+        for (int i = 0; i < 64; i++) {
+            // Set the effect type to a standard Equalizer
+            alEffecti(oalGlob.eqEffects[i], AL_EFFECT_TYPE, AL_EFFECT_EQUALIZER);
+            
+            // Bind the EQ effect to the Aux Slot
+            alAuxiliaryEffectSloti(oalGlob.eqAuxSlots[i], AL_EFFECTSLOT_EFFECT, oalGlob.eqEffects[i]);
+            oalGlob.eqActive[i] = false;
+        }
+        Com_Printf(9, "OpenAL EFX Extension Loaded Successfully.\n");
+    } else {
+        oalGlob.efxSupported = false;
+        Com_Printf(9, "WARNING: OpenAL EFX not supported by hardware. EQ disabled.\n");
+    }
+
     g_snd.Initialized2d = 1;
     g_snd.Initialized3d = 1;
     g_snd.max_2D_channels = 8;
@@ -118,6 +156,12 @@ void __cdecl SND_ShutdownDriver()
 {
     R_Cinematic_StopPlayback();
     R_Cinematic_SyncNow();
+
+    if (oalGlob.efxSupported) {
+        alDeleteEffects(64, oalGlob.eqEffects);
+        alDeleteAuxiliaryEffectSlots(64, oalGlob.eqAuxSlots);
+        alDeleteFilters(1, &oalGlob.muteFilter);
+    }
 
     alDeleteSources(g_snd.max_2D_channels + g_snd.max_3D_channels, oalGlob.sources);
     
@@ -475,16 +519,149 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo* startAliasInfo, int
 }
 
 void __cdecl SND_SetRoomtype(int roomtype) {}
-void __cdecl SND_UpdateEqs() {}
-void __cdecl SND_SetEqParams(uint32_t entchannel, int eqIndex, uint32_t band, SND_EQTYPE type, float gain, float freq, float q) {}
-void __cdecl SND_SetEqType(uint32_t entchannel, int eqIndex, uint32_t band, SND_EQTYPE type) {}
-void __cdecl SND_SetEqFreq(uint32_t entchannel, int eqIndex, uint32_t band, float freq) {}
-void __cdecl SND_SetEqGain(uint32_t entchannel, int eqIndex, uint32_t band, float gain) {}
-void __cdecl SND_SetEqQ(uint32_t entchannel, int eqIndex, uint32_t band, float q) {}
-void __cdecl SND_DisableEq(uint32_t entchannel, int eqIndex, uint32_t band) {}
-void __cdecl SND_SaveEq(MemoryFile *memFile) {}
-void __cdecl SND_RestoreEq(MemoryFile *memFile) {}
-void __cdecl SND_PrintEqParams() {}
+
+void __cdecl SND_UpdateEqs()
+{
+    if (!oalGlob.efxSupported) return;
+
+    for (int entchannel = 0; entchannel < 64; ++entchannel)
+    {
+        ALuint effect = oalGlob.eqEffects[entchannel];
+        bool hasActiveBands = false;
+
+        // Reset the OpenAL EQ to a flat baseline before applying bands
+        alEffecti(effect, AL_EFFECT_TYPE, AL_EFFECT_EQUALIZER);
+        
+        for (int band = 0; band < 3; ++band)
+        {
+            // Read from our new native OpenAL state buffer
+            SndEqParams& eq = oalGlob.eqParams[0][band][entchannel];
+
+            if (eq.enabled)
+            {
+                hasActiveBands = true;
+                
+                float gain = eq.gain; 
+                float freq = eq.freq;
+                float width = (eq.q > 0.0f) ? (1.0f / eq.q) : 1.0f;
+
+                if (freq < 500.0f || eq.type == 0) {
+                    alEffectf(effect, AL_EQUALIZER_LOW_GAIN, gain);
+                    alEffectf(effect, AL_EQUALIZER_LOW_CUTOFF, freq);
+                } 
+                else if (freq > 4000.0f || eq.type == 2) {
+                    alEffectf(effect, AL_EQUALIZER_HIGH_GAIN, gain);
+                    alEffectf(effect, AL_EQUALIZER_HIGH_CUTOFF, freq);
+                } 
+                else {
+                    if (band == 0 || band == 1) {
+                        alEffectf(effect, AL_EQUALIZER_MID1_GAIN, gain);
+                        alEffectf(effect, AL_EQUALIZER_MID1_CENTER, freq);
+                        alEffectf(effect, AL_EQUALIZER_MID1_WIDTH, width);
+                    } else {
+                        alEffectf(effect, AL_EQUALIZER_MID2_GAIN, gain);
+                        alEffectf(effect, AL_EQUALIZER_MID2_CENTER, freq);
+                        alEffectf(effect, AL_EQUALIZER_MID2_WIDTH, width);
+                    }
+                }
+            }
+        }
+
+        // Apply to hardware bus
+        if (hasActiveBands) {
+            alAuxiliaryEffectSloti(oalGlob.eqAuxSlots[entchannel], AL_EFFECTSLOT_EFFECT, effect);
+            oalGlob.eqActive[entchannel] = true;
+        } else {
+            alEffecti(effect, AL_EFFECT_TYPE, AL_EFFECT_NULL);
+            alAuxiliaryEffectSloti(oalGlob.eqAuxSlots[entchannel], AL_EFFECTSLOT_EFFECT, effect);
+            oalGlob.eqActive[entchannel] = false;
+        }
+    }
+}
+
+void __cdecl SND_SetEqParams(uint32_t entchannel, int eqIndex, uint32_t band, SND_EQTYPE type, float gain, float freq, float q)
+{
+    if (entchannel >= 64 || band >= 3 || eqIndex >= 2) return;
+    
+    oalGlob.eqParams[eqIndex][band][entchannel].enabled = 1;
+    oalGlob.eqParams[eqIndex][band][entchannel].gain = gain;
+    oalGlob.eqParams[eqIndex][band][entchannel].freq = freq;
+    oalGlob.eqParams[eqIndex][band][entchannel].q = q;
+    oalGlob.eqParams[eqIndex][band][entchannel].type = type;
+}
+
+void __cdecl SND_SetEqType(uint32_t entchannel, int eqIndex, uint32_t band, SND_EQTYPE type) {
+    if (entchannel >= 64 || band >= 3 || eqIndex >= 2) return;
+    oalGlob.eqParams[eqIndex][band][entchannel].enabled = 1;
+    oalGlob.eqParams[eqIndex][band][entchannel].type = type;
+}
+
+void __cdecl SND_SetEqFreq(uint32_t entchannel, int eqIndex, uint32_t band, float freq) {
+    if (entchannel >= 64 || band >= 3 || eqIndex >= 2) return;
+    oalGlob.eqParams[eqIndex][band][entchannel].enabled = 1;
+    oalGlob.eqParams[eqIndex][band][entchannel].freq = freq;
+}
+
+void __cdecl SND_SetEqGain(uint32_t entchannel, int eqIndex, uint32_t band, float gain) {
+    if (entchannel >= 64 || band >= 3 || eqIndex >= 2) return;
+    oalGlob.eqParams[eqIndex][band][entchannel].enabled = 1;
+    oalGlob.eqParams[eqIndex][band][entchannel].gain = gain;
+}
+
+void __cdecl SND_SetEqQ(uint32_t entchannel, int eqIndex, uint32_t band, float q) {
+    if (entchannel >= 64 || band >= 3 || eqIndex >= 2) return;
+    oalGlob.eqParams[eqIndex][band][entchannel].enabled = 1;
+    oalGlob.eqParams[eqIndex][band][entchannel].q = q;
+}
+
+void __cdecl SND_DisableEq(uint32_t entchannel, int eqIndex, uint32_t band) {
+    if (entchannel >= 64 || band >= 3 || eqIndex >= 2) return;
+    oalGlob.eqParams[eqIndex][band][entchannel].enabled = 0;
+}
+
+void __cdecl SND_SaveEq(MemoryFile *memFile)
+{
+    for (int eqIndex = 0; eqIndex < 2; ++eqIndex) {
+        for (int band = 0; band < 3; ++band) {
+            for (int entchannel = 0; entchannel < 64; ++entchannel) {
+                // memFile reads exactly 20 bytes, which our struct perfectly matches
+                MemFile_WriteData(memFile, 20, &oalGlob.eqParams[eqIndex][band][entchannel]);
+            }
+        }
+    }
+}
+
+void __cdecl SND_RestoreEq(MemoryFile *memFile)
+{
+    for (int eqIndex = 0; eqIndex < 2; ++eqIndex) {
+        for (int band = 0; band < 3; ++band) {
+            for (int entchannel = 0; entchannel < 64; ++entchannel) {
+                MemFile_ReadData(memFile, 20, (uint8_t *)&oalGlob.eqParams[eqIndex][band][entchannel]);
+            }
+        }
+    }
+}
+
+void __cdecl SND_PrintEqParams()
+{
+    Com_Printf(9, "Current OpenAL EQ Settings\n---------------\n");
+    for (int entchannel = 0; entchannel < g_snd.entchannel_count; ++entchannel)
+    {
+        snd_entchannel_info_t *channelName = SND_GetEntChannelName(entchannel);
+        Com_Printf(9, "+ %s\n", channelName->name);
+        for (int eqIndex = 0; eqIndex < 2; ++eqIndex)
+        {
+            for (int band = 0; band < 3; ++band)
+            {
+                SndEqParams* p = &oalGlob.eqParams[eqIndex][band][entchannel];
+                if (p->enabled) {
+                    Com_Printf(9, "\tBand %i: Type %i | %f Hz | %f dB | %f q\n", 
+                               band, p->type, p->freq, p->gain, p->q);
+                }
+            }
+        }
+    }
+}
 
 double __cdecl SND_Get2DChannelVolume(int index) {
     if (index < 0 || index >= g_snd.max_2D_channels) return 0.0;
@@ -738,6 +915,22 @@ void __cdecl SND_Update2DChannel(int i, int frametime)
             int entchannel = (chaninfo->alias0->flags & 0x3F00) >> 8;
             float finalVol = volume * g_snd.channelvol->channelvol[entchannel].volume * g_snd.volume;
             SND_Set2DChannelVolume(i, finalVol);
+
+            if (oalGlob.efxSupported && entchannel < 64) {
+                if (oalGlob.eqActive[entchannel]) {
+                    // Send audio to the EQ Bus
+                    alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, oalGlob.eqAuxSlots[entchannel], 0, AL_FILTER_NULL);
+                    
+                    // Kill the dry path using our custom mute filter so we ONLY hear the EQ bus
+                    alSourcei(oalGlob.sources[i], AL_DIRECT_FILTER, oalGlob.muteFilter); 
+                } else {
+                    // Disable the EQ Bus
+                    alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+                    
+                    // Restore the dry path back to normal (AL_FILTER_NULL means no filter)
+                    alSourcei(oalGlob.sources[i], AL_DIRECT_FILTER, AL_FILTER_NULL);
+                }
+            }
         }
     }
 }
@@ -769,6 +962,22 @@ void __cdecl SND_Update3DChannel(int i, int frametime)
             int entchannel = (chaninfo->alias0->flags & 0x3F00) >> 8;
             float finalVol = volume * g_snd.channelvol->channelvol[entchannel].volume * g_snd.volume;
             alSourcef(oalGlob.sources[i], AL_GAIN, finalVol);
+
+            if (oalGlob.efxSupported && entchannel < 64) {
+                if (oalGlob.eqActive[entchannel]) {
+                    // Send audio to the EQ Bus
+                    alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, oalGlob.eqAuxSlots[entchannel], 0, AL_FILTER_NULL);
+                    
+                    // Kill the dry path using our custom mute filter so we ONLY hear the EQ bus
+                    alSourcei(oalGlob.sources[i], AL_DIRECT_FILTER, oalGlob.muteFilter); 
+                } else {
+                    // Disable the EQ Bus
+                    alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+                    
+                    // Restore the dry path back to normal (AL_FILTER_NULL means no filter)
+                    alSourcei(oalGlob.sources[i], AL_DIRECT_FILTER, AL_FILTER_NULL);
+                }
+            }
         }
     }
 }
@@ -855,6 +1064,22 @@ void __cdecl SND_UpdateStreamChannel(int i, int frametime)
             if (SND_IsAliasChannel3D(entchannel)) {
                 SND_GetCurrent3DPosition(chaninfo->sndEnt, chaninfo->offset, chaninfo->org);
                 alSource3f(stream->source, AL_POSITION, chaninfo->org[0], chaninfo->org[1], chaninfo->org[2]);
+            }
+
+            if (oalGlob.efxSupported && entchannel < 64) {
+                if (oalGlob.eqActive[entchannel]) {
+                    // Send audio to the EQ Bus
+                    alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, oalGlob.eqAuxSlots[entchannel], 0, AL_FILTER_NULL);
+                    
+                    // Kill the dry path using our custom mute filter so we ONLY hear the EQ bus
+                    alSourcei(oalGlob.sources[i], AL_DIRECT_FILTER, oalGlob.muteFilter); 
+                } else {
+                    // Disable the EQ Bus
+                    alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+                    
+                    // Restore the dry path back to normal (AL_FILTER_NULL means no filter)
+                    alSourcei(oalGlob.sources[i], AL_DIRECT_FILTER, AL_FILTER_NULL);
+                }
             }
         }
     }

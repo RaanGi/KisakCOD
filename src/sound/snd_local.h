@@ -5,8 +5,23 @@
 #include "dr_wav.h"
 #include <AL/al.h>
 #include <AL/alc.h>
+#include <AL/alext.h>
+#include <AL/efx.h>
 #define NUM_STREAM_BUFFERS 4
 #define STREAM_BUFFER_SIZE 65536 // 64KB chunk size
+
+// EFX Function Pointers (If not statically linked by your OpenAL implementation)
+static LPALGENAUXILIARYEFFECTSLOTS alGenAuxiliaryEffectSlots = nullptr;
+static LPALDELETEAUXILIARYEFFECTSLOTS alDeleteAuxiliaryEffectSlots = nullptr;
+static LPALGENEFFECTS alGenEffects = nullptr;
+static LPALDELETEEFFECTS alDeleteEffects = nullptr;
+static LPALAUXILIARYEFFECTSLOTI alAuxiliaryEffectSloti = nullptr;
+static LPALEFFECTI alEffecti = nullptr;
+static LPALEFFECTF alEffectf = nullptr;
+static LPALGENFILTERS alGenFilters = nullptr;
+static LPALFILTERI alFilteri = nullptr;
+static LPALFILTERF alFilterf = nullptr;
+static LPALDELETEFILTERS alDeleteFilters = nullptr;
 #endif
 
 #include <msslib/mss.h>
@@ -103,9 +118,22 @@ struct OalStream {
 struct OalLocal {
     ALCdevice* device;
     ALCcontext* context;
+    bool isMultiChannel;
+
     ALuint sources[40];       // Replaces milesGlob.handle_sample (max_2D + max_3D)
     OalStream streams[13]; // Replaces milesGlob.handle_stream
-    bool isMultiChannel;
+
+    bool efxSupported;
+    
+    // CoD4 supports up to 64 entchannels (0-63).
+    // We create a dedicated EQ bus for each one.
+    ALuint eqAuxSlots[64]; 
+    ALuint eqEffects[64];
+    bool eqActive[64];
+    ALuint muteFilter;
+
+    // 2 banks (for lerping/saving), 3 bands, 64 entity channels
+    SndEqParams eqParams[2][3][64];
 };
 #endif
 struct MssLocal // sizeof=0x26D0
