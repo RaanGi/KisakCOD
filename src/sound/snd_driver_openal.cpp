@@ -57,6 +57,21 @@ drmp3_bool32 VFS_Tell_Global(void* pUserData, drmp3_int64* pCursor) {
     return DRMP3_TRUE;
 }
 
+double __cdecl GetWetLevel(const snd_alias_t *pAlias)
+{
+    if (g_snd.effect->wetlevel < 0.0 || g_snd.effect->wetlevel > 1.0)
+        return 0.0; // Failsafe
+    
+    if (!pAlias)
+        return g_snd.effect->wetlevel; // Master level query
+        
+    // CoD4 uses flag 0x10 to specify "No Reverb" for specific sounds (like UI clicks)
+    if (!snd_enableReverb->current.enabled || (pAlias->flags & 0x10) != 0)
+        return 0.0f;
+        
+    return g_snd.effect->wetlevel;
+}
+
 const dvar_t *snd_khz;
 const dvar_t *snd_outputConfiguration;
 
@@ -111,6 +126,15 @@ char __cdecl SND_InitDriver()
         alFilteri(oalGlob.muteFilter, AL_FILTER_TYPE, AL_FILTER_LOWPASS);
         alFilterf(oalGlob.muteFilter, AL_LOWPASS_GAIN, 0.0f); // 0 volume = completely muted
 
+        // Create the Master Reverb Bus
+        alGenAuxiliaryEffectSlots(1, &oalGlob.reverbAuxSlot);
+        alGenEffects(1, &oalGlob.reverbEffect);
+        
+        // Set effect type to Reverb
+        alEffecti(oalGlob.reverbEffect, AL_EFFECT_TYPE, AL_EFFECT_REVERB);
+        alAuxiliaryEffectSloti(oalGlob.reverbAuxSlot, AL_EFFECTSLOT_EFFECT, oalGlob.reverbEffect);
+        oalGlob.currentRoomType = -1;
+
         for (int i = 0; i < 64; i++) {
             // Set the effect type to a standard Equalizer
             alEffecti(oalGlob.eqEffects[i], AL_EFFECT_TYPE, AL_EFFECT_EQUALIZER);
@@ -158,9 +182,11 @@ void __cdecl SND_ShutdownDriver()
     R_Cinematic_SyncNow();
 
     if (oalGlob.efxSupported) {
-        alDeleteEffects(64, oalGlob.eqEffects);
         alDeleteAuxiliaryEffectSlots(64, oalGlob.eqAuxSlots);
+        alDeleteEffects(64, oalGlob.eqEffects);
         alDeleteFilters(1, &oalGlob.muteFilter);
+        alDeleteAuxiliaryEffectSlots(1, &oalGlob.reverbAuxSlot);
+        alDeleteEffects(1, &oalGlob.reverbEffect);
     }
 
     alDeleteSources(g_snd.max_2D_channels + g_snd.max_3D_channels, oalGlob.sources);
@@ -518,7 +544,68 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo* startAliasInfo, int
     return playbackId;
 }
 
-void __cdecl SND_SetRoomtype(int roomtype) {}
+// Helper to easily load EFX macros into an OpenAL effect
+void LoadEFXReverbPreset(ALuint effect, const EFXEAXREVERBPROPERTIES* preset, float masterWetLevel) 
+{
+    // Apply preset properties (mapped to standard AL_EFFECT_REVERB)
+    alEffectf(effect, AL_REVERB_DENSITY, preset->flDensity);
+    alEffectf(effect, AL_REVERB_DIFFUSION, preset->flDiffusion);
+    alEffectf(effect, AL_REVERB_GAIN, preset->flGain * masterWetLevel); // Apply Engine Wet Level here
+    alEffectf(effect, AL_REVERB_GAINHF, preset->flGainHF);
+    alEffectf(effect, AL_REVERB_DECAY_TIME, preset->flDecayTime);
+    alEffectf(effect, AL_REVERB_DECAY_HFRATIO, preset->flDecayHFRatio);
+    alEffectf(effect, AL_REVERB_REFLECTIONS_GAIN, preset->flReflectionsGain);
+    alEffectf(effect, AL_REVERB_REFLECTIONS_DELAY, preset->flReflectionsDelay);
+    alEffectf(effect, AL_REVERB_LATE_REVERB_GAIN, preset->flLateReverbGain);
+    alEffectf(effect, AL_REVERB_LATE_REVERB_DELAY, preset->flLateReverbDelay);
+    alEffectf(effect, AL_REVERB_AIR_ABSORPTION_GAINHF, preset->flAirAbsorptionGainHF);
+    alEffectf(effect, AL_REVERB_ROOM_ROLLOFF_FACTOR, preset->flRoomRolloffFactor);
+    alEffecti(effect, AL_REVERB_DECAY_HFLIMIT, preset->iDecayHFLimit);
+}
+
+void __cdecl SND_SetRoomtype(int roomtype)
+{
+    if (!oalGlob.efxSupported) return;
+    
+    // Only update the hardware if the room type actually changed to save CPU
+    // (We also check if wetLevel changed, but for simplicity let's update if roomtype changes)
+    if (roomtype == oalGlob.currentRoomType) return;
+    oalGlob.currentRoomType = roomtype;
+
+    // Map CoD4's EAX Room ID to OpenAL's EFX Presets
+    EFXEAXREVERBPROPERTIES preset = EFX_REVERB_PRESET_GENERIC; // Default
+    switch (roomtype) {
+        case 1:  preset = EFX_REVERB_PRESET_PADDEDCELL; break;
+        case 2:  preset = EFX_REVERB_PRESET_ROOM; break;
+        case 3:  preset = EFX_REVERB_PRESET_BATHROOM; break;
+        case 4:  preset = EFX_REVERB_PRESET_LIVINGROOM; break;
+        case 5:  preset = EFX_REVERB_PRESET_STONEROOM; break;
+        case 6:  preset = EFX_REVERB_PRESET_AUDITORIUM; break;
+        case 7:  preset = EFX_REVERB_PRESET_CONCERTHALL; break;
+        case 8:  preset = EFX_REVERB_PRESET_CAVE; break;
+        case 9:  preset = EFX_REVERB_PRESET_ARENA; break;
+        case 10: preset = EFX_REVERB_PRESET_HANGAR; break;
+        case 11: preset = EFX_REVERB_PRESET_CARPETEDHALLWAY; break;
+        case 12: preset = EFX_REVERB_PRESET_HALLWAY; break;
+        case 13: preset = EFX_REVERB_PRESET_STONECORRIDOR; break;
+        case 14: preset = EFX_REVERB_PRESET_ALLEY; break;
+        case 15: preset = EFX_REVERB_PRESET_FOREST; break;
+        case 16: preset = EFX_REVERB_PRESET_CITY; break;
+        case 17: preset = EFX_REVERB_PRESET_MOUNTAINS; break;
+        case 18: preset = EFX_REVERB_PRESET_QUARRY; break;
+        case 19: preset = EFX_REVERB_PRESET_PLAIN; break;
+        case 20: preset = EFX_REVERB_PRESET_PARKINGLOT; break;
+        case 21: preset = EFX_REVERB_PRESET_SEWERPIPE; break;
+        case 22: preset = EFX_REVERB_PRESET_UNDERWATER; break;
+        default: 
+            Com_PrintError(1, "OPENAL: No preset for roomtype %d\n", roomtype);
+            preset = EFX_REVERB_PRESET_GENERIC; break;
+    }
+
+    // Apply the preset to our effect, then load the effect into the Reverb Slot
+    LoadEFXReverbPreset(oalGlob.reverbEffect, &preset, GetWetLevel(0));
+    alAuxiliaryEffectSloti(oalGlob.reverbAuxSlot, AL_EFFECTSLOT_EFFECT, oalGlob.reverbEffect);
+}
 
 void __cdecl SND_UpdateEqs()
 {
@@ -788,9 +875,94 @@ void __cdecl SND_SetStreamChannelPlaybackRate(int index, int rate) {
     }
 }
 
-void __cdecl SND_Update2DChannelReverb(int index) {}
-void __cdecl SND_Update3DChannelReverb(int index) {}
-void __cdecl SND_UpdateStreamChannelReverb(int index) {}
+void __cdecl SND_Update2DChannelReverb(int index) 
+{
+    if (!oalGlob.efxSupported || index < 0 || index >= g_snd.max_2D_channels) return;
+    
+    snd_channel_info_t *chaninfo = &g_snd.chaninfo[index];
+    if (chaninfo->paused || !chaninfo->alias0) return;
+
+    ALuint source = oalGlob.sources[index];
+    int entchannel = (chaninfo->alias0->flags & 0x3F00) >> 8;
+
+    // ---- EQ / OCCLUSION (Send Index 0) ----
+    if (entchannel < 64 && oalGlob.eqActive[entchannel]) {
+        alSource3i(source, AL_AUXILIARY_SEND_FILTER, oalGlob.eqAuxSlots[entchannel], 0, AL_FILTER_NULL);
+        alSourcei(source, AL_DIRECT_FILTER, oalGlob.muteFilter); 
+    } else {
+        alSource3i(source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+        alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
+    }
+
+    // ---- ENVIRONMENTAL REVERB (Send Index 1) ----
+    float sourceWetLevel = GetWetLevel(chaninfo->alias0);
+    if (sourceWetLevel > 0.0f) {
+        alSource3i(source, AL_AUXILIARY_SEND_FILTER, oalGlob.reverbAuxSlot, 1, AL_FILTER_NULL);
+    } else {
+        alSource3i(source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 1, AL_FILTER_NULL);
+    }
+}
+
+void __cdecl SND_Update3DChannelReverb(int index) 
+{
+    if (!oalGlob.efxSupported || index < 8 || index >= g_snd.max_3D_channels + 8) return;
+    
+    snd_channel_info_t *chaninfo = &g_snd.chaninfo[index];
+    if (chaninfo->paused || !chaninfo->alias0) return;
+
+    ALuint source = oalGlob.sources[index];
+    int entchannel = (chaninfo->alias0->flags & 0x3F00) >> 8;
+
+    // ---- EQ / OCCLUSION (Send Index 0) ----
+    if (entchannel < 64 && oalGlob.eqActive[entchannel]) {
+        alSource3i(source, AL_AUXILIARY_SEND_FILTER, oalGlob.eqAuxSlots[entchannel], 0, AL_FILTER_NULL);
+        alSourcei(source, AL_DIRECT_FILTER, oalGlob.muteFilter); 
+    } else {
+        alSource3i(source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+        alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
+    }
+
+    // ---- ENVIRONMENTAL REVERB (Send Index 1) ----
+    float sourceWetLevel = GetWetLevel(chaninfo->alias0);
+    if (sourceWetLevel > 0.0f) {
+        alSource3i(source, AL_AUXILIARY_SEND_FILTER, oalGlob.reverbAuxSlot, 1, AL_FILTER_NULL);
+    } else {
+        alSource3i(source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 1, AL_FILTER_NULL);
+    }
+}
+
+void __cdecl SND_UpdateStreamChannelReverb(int index) 
+{
+    if (!oalGlob.efxSupported || index < 40 || index >= g_snd.max_stream_channels + 40) return;
+    
+    snd_channel_info_t *chaninfo = &g_snd.chaninfo[index];
+    if (chaninfo->paused || !chaninfo->alias0) return;
+
+    int localIdx = index - (g_snd.max_2D_channels + g_snd.max_3D_channels);
+    OalStream* stream = &oalGlob.streams[localIdx];
+    
+    if (!stream->active) return;
+
+    ALuint source = stream->source;
+    int entchannel = (chaninfo->alias0->flags & 0x3F00) >> 8;
+
+    // ---- EQ / OCCLUSION (Send Index 0) ----
+    if (entchannel < 64 && oalGlob.eqActive[entchannel]) {
+        alSource3i(source, AL_AUXILIARY_SEND_FILTER, oalGlob.eqAuxSlots[entchannel], 0, AL_FILTER_NULL);
+        alSourcei(source, AL_DIRECT_FILTER, oalGlob.muteFilter); 
+    } else {
+        alSource3i(source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+        alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
+    }
+
+    // ---- ENVIRONMENTAL REVERB (Send Index 1) ----
+    float sourceWetLevel = GetWetLevel(chaninfo->alias0);
+    if (sourceWetLevel > 0.0f) {
+        alSource3i(source, AL_AUXILIARY_SEND_FILTER, oalGlob.reverbAuxSlot, 1, AL_FILTER_NULL);
+    } else {
+        alSource3i(source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 1, AL_FILTER_NULL);
+    }
+}
 
 int __cdecl SND_Get2DChannelLength(int index) {
     if (index >= 0 && index < g_snd.max_2D_channels) return g_snd.chaninfo[index].totalMsec;
@@ -915,22 +1087,6 @@ void __cdecl SND_Update2DChannel(int i, int frametime)
             int entchannel = (chaninfo->alias0->flags & 0x3F00) >> 8;
             float finalVol = volume * g_snd.channelvol->channelvol[entchannel].volume * g_snd.volume;
             SND_Set2DChannelVolume(i, finalVol);
-
-            if (oalGlob.efxSupported && entchannel < 64) {
-                if (oalGlob.eqActive[entchannel]) {
-                    // Send audio to the EQ Bus
-                    alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, oalGlob.eqAuxSlots[entchannel], 0, AL_FILTER_NULL);
-                    
-                    // Kill the dry path using our custom mute filter so we ONLY hear the EQ bus
-                    alSourcei(oalGlob.sources[i], AL_DIRECT_FILTER, oalGlob.muteFilter); 
-                } else {
-                    // Disable the EQ Bus
-                    alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
-                    
-                    // Restore the dry path back to normal (AL_FILTER_NULL means no filter)
-                    alSourcei(oalGlob.sources[i], AL_DIRECT_FILTER, AL_FILTER_NULL);
-                }
-            }
         }
     }
 }
@@ -962,22 +1118,6 @@ void __cdecl SND_Update3DChannel(int i, int frametime)
             int entchannel = (chaninfo->alias0->flags & 0x3F00) >> 8;
             float finalVol = volume * g_snd.channelvol->channelvol[entchannel].volume * g_snd.volume;
             alSourcef(oalGlob.sources[i], AL_GAIN, finalVol);
-
-            if (oalGlob.efxSupported && entchannel < 64) {
-                if (oalGlob.eqActive[entchannel]) {
-                    // Send audio to the EQ Bus
-                    alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, oalGlob.eqAuxSlots[entchannel], 0, AL_FILTER_NULL);
-                    
-                    // Kill the dry path using our custom mute filter so we ONLY hear the EQ bus
-                    alSourcei(oalGlob.sources[i], AL_DIRECT_FILTER, oalGlob.muteFilter); 
-                } else {
-                    // Disable the EQ Bus
-                    alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
-                    
-                    // Restore the dry path back to normal (AL_FILTER_NULL means no filter)
-                    alSourcei(oalGlob.sources[i], AL_DIRECT_FILTER, AL_FILTER_NULL);
-                }
-            }
         }
     }
 }
@@ -1064,22 +1204,6 @@ void __cdecl SND_UpdateStreamChannel(int i, int frametime)
             if (SND_IsAliasChannel3D(entchannel)) {
                 SND_GetCurrent3DPosition(chaninfo->sndEnt, chaninfo->offset, chaninfo->org);
                 alSource3f(stream->source, AL_POSITION, chaninfo->org[0], chaninfo->org[1], chaninfo->org[2]);
-            }
-
-            if (oalGlob.efxSupported && entchannel < 64) {
-                if (oalGlob.eqActive[entchannel]) {
-                    // Send audio to the EQ Bus
-                    alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, oalGlob.eqAuxSlots[entchannel], 0, AL_FILTER_NULL);
-                    
-                    // Kill the dry path using our custom mute filter so we ONLY hear the EQ bus
-                    alSourcei(oalGlob.sources[i], AL_DIRECT_FILTER, oalGlob.muteFilter); 
-                } else {
-                    // Disable the EQ Bus
-                    alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
-                    
-                    // Restore the dry path back to normal (AL_FILTER_NULL means no filter)
-                    alSourcei(oalGlob.sources[i], AL_DIRECT_FILTER, AL_FILTER_NULL);
-                }
             }
         }
     }

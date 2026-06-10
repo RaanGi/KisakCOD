@@ -7,6 +7,7 @@
 #include <AL/alc.h>
 #include <AL/alext.h>
 #include <AL/efx.h>
+#include <AL/efx-presets.h>
 #define NUM_STREAM_BUFFERS 4
 #define STREAM_BUFFER_SIZE 65536 // 64KB chunk size
 
@@ -131,6 +132,9 @@ struct OalLocal {
     ALuint eqEffects[64];
     bool eqActive[64];
     ALuint muteFilter;
+    ALuint reverbAuxSlot;
+    ALuint reverbEffect;
+    int currentRoomType;
 
     // 2 banks (for lerping/saving), 3 bands, 64 entity channels
     SndEqParams eqParams[2][3][64];
