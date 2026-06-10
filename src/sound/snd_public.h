@@ -639,6 +639,8 @@ int SND_FindPlaybackId(const snd_alias_t *sndEnt, const char *aliasName);
 
 // snd_driver_load_obj
 struct LoadedSound *__cdecl SND_LoadSoundFile(const char *name);
+void __cdecl SND_FreeLoadedSound(LoadedSound *loadSnd);
+
 
 extern const dvar_t *snd_cinematicVolumeScale;
 extern const dvar_t *snd_enable3D;

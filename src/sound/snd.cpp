@@ -5,7 +5,9 @@
 #include <qcommon/qcommon.h>
 #include <qcommon/cmd.h>
 #include <universal/com_sndalias.h>
+#include <universal/com_memory.h>
 #include <database/database.h>
+
 #include <universal/q_parse.h>
 #include <client/client.h>
 #include <universal/profile.h>
@@ -5065,5 +5067,26 @@ int SND_FindPlaybackId(const snd_alias_t *sndEnt, const char *aliasName)
     }
     return (int)*(p_alias0 - 12);
 }
+
+void __cdecl SND_FreeLoadedSound(LoadedSound *loadSnd)
+{
+    if (!loadSnd)
+        return;
+
+#ifdef USE_OPENAL
+    if (loadSnd->sound.oalBuffer != 0)
+    {
+        alDeleteBuffers(1, &loadSnd->sound.oalBuffer);
+        loadSnd->sound.oalBuffer = 0;
+    }
+#else
+    if (loadSnd->sound.data)
+    {
+        Z_Free(loadSnd->sound.data, 15);
+        loadSnd->sound.data = nullptr;
+    }
+#endif
+}
+
 
 #endif // KISAK_SP

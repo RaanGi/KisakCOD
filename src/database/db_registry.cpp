@@ -785,8 +785,9 @@ void __cdecl Mark_ClipMapAsset(clipMap_t *clipMap)
 void __cdecl DB_RemoveLoadedSound(XAssetHeader header)
 {
     //Z_Free((char *)header.xmodelPieces[3].numpieces, 15);
-    Z_Free(header.loadSnd->sound.data, 15);
+    SND_FreeLoadedSound(header.loadSnd);
 }
+
 
 void __cdecl DB_RemoveClipMap(XAssetHeader ass)
 {
