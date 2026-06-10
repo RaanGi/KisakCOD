@@ -531,6 +531,11 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo* startAliasInfo, int
     float realVolume = startAliasInfo->volume * g_snd.volume * g_snd.channelvol->channelvol[entchannel].volume;
     alSourcef(stream->source, AL_GAIN, realVolume);
     alSourcei(stream->source, AL_LOOPING, AL_FALSE); // Queue handles looping manually
+    float pitch = startAliasInfo->pitch;
+    if (startAliasInfo->timescale && g_snd.timescale > 0.0f) {
+        pitch *= g_snd.timescale;
+    }
+    alSourcef(stream->source, AL_PITCH, pitch);
     alSourcePlay(stream->source);
     stream->active = true;
 
