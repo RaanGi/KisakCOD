@@ -125,6 +125,9 @@ char __cdecl SND_InitDriver()
         alGenFilters(1, &oalGlob.muteFilter);
         alFilteri(oalGlob.muteFilter, AL_FILTER_TYPE, AL_FILTER_LOWPASS);
         alFilterf(oalGlob.muteFilter, AL_LOWPASS_GAIN, 0.0f); // 0 volume = completely muted
+        
+        for (int i = 0; i < 64; i++) oalGlob.eqDirty[i] = true;
+
 
         // Create the Master Reverb Bus
         alGenAuxiliaryEffectSlots(1, &oalGlob.reverbAuxSlot);
@@ -622,6 +625,8 @@ void __cdecl SND_UpdateEqs()
 
     for (int entchannel = 0; entchannel < 64; ++entchannel)
     {
+        if (!oalGlob.eqDirty[entchannel]) continue;
+
         ALuint effect = oalGlob.eqEffects[entchannel];
         bool hasActiveBands = false;
 
@@ -650,11 +655,16 @@ void __cdecl SND_UpdateEqs()
                     alEffectf(effect, AL_EQUALIZER_HIGH_CUTOFF, freq);
                 } 
                 else {
-                    if (band == 0 || band == 1) {
+                    if (band == 0) {
                         alEffectf(effect, AL_EQUALIZER_MID1_GAIN, gain);
                         alEffectf(effect, AL_EQUALIZER_MID1_CENTER, freq);
                         alEffectf(effect, AL_EQUALIZER_MID1_WIDTH, width);
+                    } else if (band == 1) {
+                        alEffectf(effect, AL_EQUALIZER_MID2_GAIN, gain);
+                        alEffectf(effect, AL_EQUALIZER_MID2_CENTER, freq);
+                        alEffectf(effect, AL_EQUALIZER_MID2_WIDTH, width);
                     } else {
+                        // Band 2 shares MID2 if it's in the mid-range, but 0 and 1 are now separate
                         alEffectf(effect, AL_EQUALIZER_MID2_GAIN, gain);
                         alEffectf(effect, AL_EQUALIZER_MID2_CENTER, freq);
                         alEffectf(effect, AL_EQUALIZER_MID2_WIDTH, width);
@@ -672,8 +682,10 @@ void __cdecl SND_UpdateEqs()
             alAuxiliaryEffectSloti(oalGlob.eqAuxSlots[entchannel], AL_EFFECTSLOT_EFFECT, effect);
             oalGlob.eqActive[entchannel] = false;
         }
+        oalGlob.eqDirty[entchannel] = false;
     }
 }
+
 
 void __cdecl SND_SetEqParams(uint32_t entchannel, int eqIndex, uint32_t band, SND_EQTYPE type, float gain, float freq, float q)
 {
@@ -684,36 +696,44 @@ void __cdecl SND_SetEqParams(uint32_t entchannel, int eqIndex, uint32_t band, SN
     oalGlob.eqParams[eqIndex][band][entchannel].freq = freq;
     oalGlob.eqParams[eqIndex][band][entchannel].q = q;
     oalGlob.eqParams[eqIndex][band][entchannel].type = type;
+    oalGlob.eqDirty[entchannel] = true;
 }
+
 
 void __cdecl SND_SetEqType(uint32_t entchannel, int eqIndex, uint32_t band, SND_EQTYPE type) {
     if (entchannel >= 64 || band >= 3 || eqIndex >= 2) return;
     oalGlob.eqParams[eqIndex][band][entchannel].enabled = 1;
     oalGlob.eqParams[eqIndex][band][entchannel].type = type;
+    oalGlob.eqDirty[entchannel] = true;
 }
 
 void __cdecl SND_SetEqFreq(uint32_t entchannel, int eqIndex, uint32_t band, float freq) {
     if (entchannel >= 64 || band >= 3 || eqIndex >= 2) return;
     oalGlob.eqParams[eqIndex][band][entchannel].enabled = 1;
     oalGlob.eqParams[eqIndex][band][entchannel].freq = freq;
+    oalGlob.eqDirty[entchannel] = true;
 }
 
 void __cdecl SND_SetEqGain(uint32_t entchannel, int eqIndex, uint32_t band, float gain) {
     if (entchannel >= 64 || band >= 3 || eqIndex >= 2) return;
     oalGlob.eqParams[eqIndex][band][entchannel].enabled = 1;
     oalGlob.eqParams[eqIndex][band][entchannel].gain = gain;
+    oalGlob.eqDirty[entchannel] = true;
 }
 
 void __cdecl SND_SetEqQ(uint32_t entchannel, int eqIndex, uint32_t band, float q) {
     if (entchannel >= 64 || band >= 3 || eqIndex >= 2) return;
     oalGlob.eqParams[eqIndex][band][entchannel].enabled = 1;
     oalGlob.eqParams[eqIndex][band][entchannel].q = q;
+    oalGlob.eqDirty[entchannel] = true;
 }
 
 void __cdecl SND_DisableEq(uint32_t entchannel, int eqIndex, uint32_t band) {
     if (entchannel >= 64 || band >= 3 || eqIndex >= 2) return;
     oalGlob.eqParams[eqIndex][band][entchannel].enabled = 0;
+    oalGlob.eqDirty[entchannel] = true;
 }
+
 
 void __cdecl SND_SaveEq(MemoryFile *memFile)
 {
@@ -903,7 +923,7 @@ void __cdecl SND_Update2DChannelReverb(int index)
     // ---- EQ / OCCLUSION (Send Index 0) ----
     if (entchannel < 64 && oalGlob.eqActive[entchannel]) {
         alSource3i(source, AL_AUXILIARY_SEND_FILTER, oalGlob.eqAuxSlots[entchannel], 0, AL_FILTER_NULL);
-        alSourcei(source, AL_DIRECT_FILTER, oalGlob.muteFilter); 
+        // Removed direct mute to avoid "dry" sound; signal now mixes processed and unprocessed
     } else {
         alSource3i(source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
         alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
@@ -917,6 +937,7 @@ void __cdecl SND_Update2DChannelReverb(int index)
         alSource3i(source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 1, AL_FILTER_NULL);
     }
 }
+
 
 void __cdecl SND_Update3DChannelReverb(int index) 
 {
@@ -931,7 +952,7 @@ void __cdecl SND_Update3DChannelReverb(int index)
     // ---- EQ / OCCLUSION (Send Index 0) ----
     if (entchannel < 64 && oalGlob.eqActive[entchannel]) {
         alSource3i(source, AL_AUXILIARY_SEND_FILTER, oalGlob.eqAuxSlots[entchannel], 0, AL_FILTER_NULL);
-        alSourcei(source, AL_DIRECT_FILTER, oalGlob.muteFilter); 
+        // Removed direct mute to avoid "dry" sound; signal now mixes processed and unprocessed
     } else {
         alSource3i(source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
         alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
@@ -945,6 +966,7 @@ void __cdecl SND_Update3DChannelReverb(int index)
         alSource3i(source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 1, AL_FILTER_NULL);
     }
 }
+
 
 void __cdecl SND_UpdateStreamChannelReverb(int index) 
 {
@@ -964,7 +986,7 @@ void __cdecl SND_UpdateStreamChannelReverb(int index)
     // ---- EQ / OCCLUSION (Send Index 0) ----
     if (entchannel < 64 && oalGlob.eqActive[entchannel]) {
         alSource3i(source, AL_AUXILIARY_SEND_FILTER, oalGlob.eqAuxSlots[entchannel], 0, AL_FILTER_NULL);
-        alSourcei(source, AL_DIRECT_FILTER, oalGlob.muteFilter); 
+        // Removed direct mute to avoid "dry" sound; signal now mixes processed and unprocessed
     } else {
         alSource3i(source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
         alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
@@ -978,6 +1000,7 @@ void __cdecl SND_UpdateStreamChannelReverb(int index)
         alSource3i(source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 1, AL_FILTER_NULL);
     }
 }
+
 
 int __cdecl SND_Get2DChannelLength(int index) {
     if (index >= 0 && index < g_snd.max_2D_channels) return g_snd.chaninfo[index].totalMsec;

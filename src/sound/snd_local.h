@@ -131,7 +131,9 @@ struct OalLocal {
     ALuint eqAuxSlots[64]; 
     ALuint eqEffects[64];
     bool eqActive[64];
+    bool eqDirty[64];
     ALuint muteFilter;
+
     ALuint reverbAuxSlot;
     ALuint reverbEffect;
     int currentRoomType;
