@@ -8,7 +8,7 @@
 #include <AL/alext.h>
 #include <AL/efx.h>
 #include <AL/efx-presets.h>
-#define NUM_STREAM_BUFFERS 4
+#define NUM_STREAM_BUFFERS 12
 #define STREAM_BUFFER_SIZE 65536 // 64KB chunk size
 
 // EFX Function Pointers (If not statically linked by your OpenAL implementation)

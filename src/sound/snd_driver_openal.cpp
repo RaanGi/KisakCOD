@@ -573,8 +573,9 @@ void __cdecl SND_SetRoomtype(int roomtype)
     oalGlob.currentRoomType = roomtype;
 
     // Map CoD4's EAX Room ID to OpenAL's EFX Presets
-    EFXEAXREVERBPROPERTIES preset = EFX_REVERB_PRESET_GENERIC; // Default
+    EFXEAXREVERBPROPERTIES preset;
     switch (roomtype) {
+        case 0:  preset = EFX_REVERB_PRESET_GENERIC; break;
         case 1:  preset = EFX_REVERB_PRESET_PADDEDCELL; break;
         case 2:  preset = EFX_REVERB_PRESET_ROOM; break;
         case 3:  preset = EFX_REVERB_PRESET_BATHROOM; break;
@@ -597,6 +598,9 @@ void __cdecl SND_SetRoomtype(int roomtype)
         case 20: preset = EFX_REVERB_PRESET_PARKINGLOT; break;
         case 21: preset = EFX_REVERB_PRESET_SEWERPIPE; break;
         case 22: preset = EFX_REVERB_PRESET_UNDERWATER; break;
+        case 23: preset = EFX_REVERB_PRESET_DRUGGED; break;
+        case 24: preset = EFX_REVERB_PRESET_DIZZY; break;
+        case 25: preset = EFX_REVERB_PRESET_PSYCHOTIC; break;
         default: 
             Com_PrintError(1, "OPENAL: No preset for roomtype %d\n", roomtype);
             preset = EFX_REVERB_PRESET_GENERIC; break;
@@ -815,9 +819,12 @@ int __cdecl SND_Get2DChannelPlaybackRate(int index) {
 
     ALint baseFreq = 44100;
     alGetBufferi(buffer, AL_FREQUENCY, &baseFreq);
+
     ALfloat pitch = 1.0f;
     alGetSourcef(source, AL_PITCH, &pitch);
-    return (int)(baseFreq * pitch);
+
+    // Add + 0.5f to force exact integer rounding, preventing drift
+    return (int)((ALfloat)baseFreq * pitch + 0.5f);
 }
 
 void __cdecl SND_Set2DChannelPlaybackRate(int index, int rate) {
@@ -841,9 +848,12 @@ int __cdecl SND_Get3DChannelPlaybackRate(int index) {
 
     ALint baseFreq = 44100;
     alGetBufferi(buffer, AL_FREQUENCY, &baseFreq);
+
     ALfloat pitch = 1.0f;
     alGetSourcef(source, AL_PITCH, &pitch);
-    return (int)(baseFreq * pitch);
+
+    // Add + 0.5f to force exact integer rounding, preventing drift
+    return (int)((ALfloat)baseFreq * pitch + 0.5f);
 }
 
 void __cdecl SND_Set3DChannelPlaybackRate(int index, int rate) {
@@ -863,7 +873,7 @@ int __cdecl SND_GetStreamChannelPlaybackRate(int index) {
     if (localIdx >= 0 && localIdx < g_snd.max_stream_channels && oalGlob.streams[localIdx].active) {
         ALfloat pitch = 1.0f;
         alGetSourcef(oalGlob.streams[localIdx].source, AL_PITCH, &pitch);
-        return (int)(oalGlob.streams[localIdx].rate * pitch);
+        return (int)((ALfloat)oalGlob.streams[localIdx].rate * pitch + 0.5f);
     }
     return 44100;
 }
