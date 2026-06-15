@@ -5068,6 +5068,9 @@ int SND_FindPlaybackId(const snd_alias_t *sndEnt, const char *aliasName)
     return (int)*(p_alias0 - 12);
 }
 
+#endif // KISAK_SP
+
+#ifndef KISAK_DEDICATED
 void __cdecl SND_FreeLoadedSound(LoadedSound *loadSnd)
 {
     if (!loadSnd)
@@ -5087,6 +5090,4 @@ void __cdecl SND_FreeLoadedSound(LoadedSound *loadSnd)
     }
 #endif
 }
-
-
-#endif // KISAK_SP
+#endif // KISAK_DEDICATED

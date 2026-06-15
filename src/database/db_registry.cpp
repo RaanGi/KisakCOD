@@ -784,8 +784,15 @@ void __cdecl Mark_ClipMapAsset(clipMap_t *clipMap)
 
 void __cdecl DB_RemoveLoadedSound(XAssetHeader header)
 {
-    //Z_Free((char *)header.xmodelPieces[3].numpieces, 15);
+    if (!header.loadSnd) return;
+
+#ifdef KISAK_DEDICATED
+    // Dedicated servers have no audio driver, so they just free the RAM directly
+    Z_Free(header.loadSnd->sound.data, 15);
+#else
+    // SP and MP clients delegate memory/VRAM cleanup to the active sound driver
     SND_FreeLoadedSound(header.loadSnd);
+#endif
 }
 
 
