@@ -1110,10 +1110,20 @@ void __cdecl SND_Update2DChannel(int i, int frametime)
     
     if (!chaninfo->paused && chaninfo->alias0)
     {
+        // 1. Subtract elapsed time from the delay!
+        if (chaninfo->startDelay > 0) {
+            chaninfo->startDelay -= frametime;
+            // The exact millisecond the delay finishes, kickstart the hardware!
+            if (chaninfo->startDelay <= 0) {
+                alSourcePlay(oalGlob.sources[i]);
+            }
+        }
+
         ALint state;
         alGetSourcei(oalGlob.sources[i], AL_SOURCE_STATE, &state);
-        
-        bool isHardwareStopped = (!chaninfo->startDelay && state == AL_STOPPED);
+
+        // 2. Only consider the sound finished if the delay is over AND it stopped playing
+        bool isHardwareStopped = (chaninfo->startDelay <= 0 && state == AL_STOPPED);
         bool chainTimeReached = (chaninfo->alias0->chainAliasName && (chaninfo->totalMsec + chaninfo->startTime - g_snd.time <= 0));
 
         if (isHardwareStopped || chainTimeReached) SND_StopChannelAndPlayChainAlias(i);
@@ -1137,10 +1147,17 @@ void __cdecl SND_Update3DChannel(int i, int frametime)
     
     if (!chaninfo->paused && chaninfo->alias0)
     {
+        if (chaninfo->startDelay > 0) {
+            chaninfo->startDelay -= frametime;
+            if (chaninfo->startDelay <= 0) {
+                alSourcePlay(oalGlob.sources[i]);
+            }
+        }
+
         ALint state;
         alGetSourcei(oalGlob.sources[i], AL_SOURCE_STATE, &state);
-        
-        bool isHardwareStopped = (!chaninfo->startDelay && state == AL_STOPPED);
+
+        bool isHardwareStopped = (chaninfo->startDelay <= 0 && state == AL_STOPPED);
         bool chainTimeReached = (chaninfo->alias0->chainAliasName && (chaninfo->totalMsec + chaninfo->startTime - g_snd.time <= 0));
 
         if (isHardwareStopped || chainTimeReached) SND_StopChannelAndPlayChainAlias(i);

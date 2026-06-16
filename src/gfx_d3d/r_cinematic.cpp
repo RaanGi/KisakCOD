@@ -553,7 +553,7 @@ char __cdecl R_Cinematic_StartPlayback_Now(const char *filename, uint32_t playba
                            
                 SND_CinematicInitAudio(s_binkTrack->Frequency, s_binkTrack->Channels, s_binkTrack->Bits);
             } else {
-                Com_Printf(0, "^1[BINK AUDIO] ERROR: BinkOpenTrack returned NULL!^7\n");
+                Com_PrintError(0, "^1[BINK AUDIO] ERROR: BinkOpenTrack returned NULL!^7\n");
             }
         }
 #else
@@ -566,7 +566,6 @@ char __cdecl R_Cinematic_StartPlayback_Now(const char *filename, uint32_t playba
         BinkRegisterFrameBuffers(cinematicGlob.bink, &cinematicGlob.binkTextureSet.bink_buffers);
         R_Cinematic_CheckBinkError();
         cinematicGlob.currentPaused = CINEMATIC_NOT_PAUSED;
-        Com_PrintWarning(0, "[BINK] NUMBER OF TRACKS: %d\n", cinematicGlob.bink->NumTracks);
         return 1;
     }
     else
