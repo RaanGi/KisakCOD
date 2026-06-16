@@ -26,6 +26,9 @@
 CinematicGlob cinematicGlob;
 bool g_cinematicThreadInitialized;
 CinematicThreadState g_cinematicThreadState;
+#ifdef USE_OPENAL
+static HBINKTRACK s_binkTrack = 0;
+#endif
 
 int __cdecl CinematicHunk_Alloc(CinematicHunk* hunk, int size)
 {
@@ -321,6 +324,26 @@ char __cdecl R_Cinematic_Advance()
         {
             PROF_SCOPED("BinkDoFrame");
             skipped = BinkDoFrame(cinematicGlob.bink);
+#ifdef USE_OPENAL
+            if (s_binkTrack) {
+                // Bink 1.9i tracks have a MaxSize property we can use for safe allocations
+                uint32_t maxBytes = s_binkTrack->MaxSize;
+                
+                if (maxBytes > 0) {
+                    uint8_t* pcmBuffer = (uint8_t*)Z_Malloc(maxBytes, "BINK_AUDIO", 15);
+                    
+                    // Extract the decoded PCM data for this specific frame
+                    uint32_t decodedBytes = BinkGetTrackData(s_binkTrack, pcmBuffer);
+                    
+                    if (decodedBytes > 0) {
+                        // Push the exact amount of bytes decoded to OpenAL
+                        SND_CinematicPushAudio(pcmBuffer, decodedBytes);
+                    }
+                    
+                    Z_Free(pcmBuffer, 15);
+                }
+            }
+#endif
         }
         if (!skipped)
         {
@@ -444,6 +467,13 @@ void __cdecl R_Cinematic_UpdateTimeInMsec(const BINKREALTIME *binkRealtime)
 
 void R_Cinematic_StopPlayback_Now()
 {
+#ifdef USE_OPENAL
+    if (s_binkTrack) {
+        BinkCloseTrack(s_binkTrack);
+        s_binkTrack = 0;
+    }
+    SND_CinematicStopAudio();
+#endif
     cinematicGlob.activeImageFrame = -1;
     if (cinematicGlob.hasFileIO)
         R_Cinematic_RelinquishIO();
@@ -512,7 +542,23 @@ char __cdecl R_Cinematic_StartPlayback_Now(const char *filename, uint32_t playba
     {
         R_Cinematic_CheckBinkError();
         iassert( cinematicGlob.bink );
+#ifdef USE_OPENAL
+        if (cinematicGlob.bink->NumTracks > 0) {
+            s_binkTrack = BinkOpenTrack(cinematicGlob.bink, 0); 
+            
+            if (s_binkTrack) {
+                // LOG 1: Verify Bink opened the track
+                Com_Printf(0, "^3[BINK AUDIO] Track 0 Opened! %d Hz, %d Chans, %d Bits. MaxChunk: %d bytes.^7\n", 
+                           s_binkTrack->Frequency, s_binkTrack->Channels, s_binkTrack->Bits, s_binkTrack->MaxSize);
+                           
+                SND_CinematicInitAudio(s_binkTrack->Frequency, s_binkTrack->Channels, s_binkTrack->Bits);
+            } else {
+                Com_Printf(0, "^1[BINK AUDIO] ERROR: BinkOpenTrack returned NULL!^7\n");
+            }
+        }
+#else
         R_Cinematic_InitBinkVolumes();
+#endif
         memset(&cinematicGlob.binkTextureSet, 0, sizeof(cinematicGlob.binkTextureSet));
         BinkGetFrameBuffersInfo(cinematicGlob.bink, &cinematicGlob.binkTextureSet.bink_buffers);
         R_Cinematic_CheckBinkError();
@@ -520,6 +566,7 @@ char __cdecl R_Cinematic_StartPlayback_Now(const char *filename, uint32_t playba
         BinkRegisterFrameBuffers(cinematicGlob.bink, &cinematicGlob.binkTextureSet.bink_buffers);
         R_Cinematic_CheckBinkError();
         cinematicGlob.currentPaused = CINEMATIC_NOT_PAUSED;
+        Com_PrintWarning(0, "[BINK] NUMBER OF TRACKS: %d\n", cinematicGlob.bink->NumTracks);
         return 1;
     }
     else

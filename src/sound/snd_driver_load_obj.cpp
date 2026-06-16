@@ -73,22 +73,33 @@ LoadedSound* __cdecl SND_LoadFromBuffer(void* buffer, const char* soundName)
     }
 #else
     // --- Original MSS logic ---
-    _AILSOUNDINFO info;
+    _AILSOUNDINFO info; // [esp+8h] [ebp-28h] BYREF
+    LoadedSound *loadSnd; // [esp+2Ch] [ebp-4h]
+
+    if (!buffer)
+        MyAssertHandler(".\\win32\\snd_driver_load_obj.cpp", 134, 0, "%s", "buffer");
     if (AIL_WAV_info(buffer, &info))
     {
         if (info.data_len)
         {
-            loadSnd = (LoadedSound*)Hunk_Alloc(sizeof(LoadedSound), "SND_LoadFromBuffer", 15);
+            loadSnd = (LoadedSound*)Hunk_Alloc(0x2Cu, "SND_LoadFromBuffer", 15);
             loadSnd->name = soundName;
             qmemcpy(&loadSnd->sound, &info, 0x24u);
             SND_SetData(&loadSnd->sound, (void*)info.data_ptr);
             return loadSnd;
         }
+        else
+        {
+            Com_PrintError(1, "ERROR: Sound file '%s' is zero length, invalid\n", soundName);
+            return 0;
+        }
     }
 #endif
-
-    Com_PrintError(1, "ERROR: Sound file '%s' is zero length, invalid or corrupted format\n", soundName);
-    return 0;
+    else
+    {
+        Com_PrintError(1, "ERROR: Sound file '%s' is in an invalid or corrupted format\n", soundName);
+        return 0;
+    }
 }
 
 LoadedSound *__cdecl SND_LoadSoundFile(const char *name)

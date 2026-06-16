@@ -140,6 +140,13 @@ struct OalLocal {
 
     // 2 banks (for lerping/saving), 3 bands, 64 entity channels
     SndEqParams eqParams[2][3][64];
+
+    ALuint cinematicSource;
+    ALuint cinematicBuffers[NUM_STREAM_BUFFERS];
+    bool cinematicActive;
+    ALenum cinematicFormat;
+    uint32_t cinematicRate;
+    uint32_t cinematicWriteIdx;
 };
 #endif
 struct MssLocal // sizeof=0x26D0

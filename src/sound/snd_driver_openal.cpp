@@ -485,6 +485,7 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo* startAliasInfo, int
         if (totalFrames == 0) totalFrames = 5 * stream->rate; // Failsafe
     } 
     else {
+        Com_PrintError(1, "AUDIO ERROR: Both MP3 and WAV decoders failed to parse stream '%s'. File may be unsupported.\n", realname);
         FS_FCloseFile(stream->fileHandle);
         return SND_SetPlaybackIdNotPlayed(index);
     }
@@ -1253,6 +1254,83 @@ void SND_SetEqLerp(double lerp) {}
 
 struct _DIG_DRIVER* __cdecl MSS_GetDriver(void) { 
     return nullptr; 
+}
+
+void __cdecl SND_CinematicInitAudio(int rate, int channels, int bits)
+{
+    if (!oalGlob.context) return;
+
+    oalGlob.cinematicFormat = AL_FORMAT_MONO16; 
+    if (channels == 1 && bits == 8)       oalGlob.cinematicFormat = AL_FORMAT_MONO8;
+    else if (channels == 1 && bits == 16) oalGlob.cinematicFormat = AL_FORMAT_MONO16;
+    else if (channels == 2 && bits == 8)  oalGlob.cinematicFormat = AL_FORMAT_STEREO8;
+    else if (channels == 2 && bits == 16) oalGlob.cinematicFormat = AL_FORMAT_STEREO16;
+    
+    oalGlob.cinematicRate = rate;
+    oalGlob.cinematicWriteIdx = 0; // Reset the rotating index
+
+    alGenSources(1, &oalGlob.cinematicSource);
+    alGenBuffers(NUM_STREAM_BUFFERS, oalGlob.cinematicBuffers);
+
+    alSourcei(oalGlob.cinematicSource, AL_SOURCE_RELATIVE, AL_TRUE);
+    alSource3f(oalGlob.cinematicSource, AL_POSITION, 0.0f, 0.0f, 0.0f);
+    alSourcei(oalGlob.cinematicSource, AL_LOOPING, AL_FALSE);
+    
+    // Force full volume to guarantee we hear it during testing
+    alSourcef(oalGlob.cinematicSource, AL_GAIN, 1.0f);
+
+    oalGlob.cinematicActive = true;
+}
+
+void __cdecl SND_CinematicPushAudio(const uint8_t* pcmData, size_t bytes)
+{
+    if (!oalGlob.cinematicActive || !pcmData || bytes == 0) return;
+
+    // 1. Unqueue all buffers that have finished playing
+    ALint processed;
+    alGetSourcei(oalGlob.cinematicSource, AL_BUFFERS_PROCESSED, &processed);
+    while (processed > 0) {
+        ALuint bufferId;
+        alSourceUnqueueBuffers(oalGlob.cinematicSource, 1, &bufferId);
+        processed--;
+    }
+
+    // 2. Safely push new data using the rotating write index
+    ALint queued;
+    alGetSourcei(oalGlob.cinematicSource, AL_BUFFERS_QUEUED, &queued);
+    
+    if (queued < NUM_STREAM_BUFFERS) {
+        // Safely pick the next buffer in the ring
+        ALuint freeBuffer = oalGlob.cinematicBuffers[oalGlob.cinematicWriteIdx];
+        
+        // Rotate the index forward, wrapping around back to 0 if we hit the limit
+        oalGlob.cinematicWriteIdx = (oalGlob.cinematicWriteIdx + 1) % NUM_STREAM_BUFFERS;
+
+        alBufferData(freeBuffer, oalGlob.cinematicFormat, pcmData, bytes, oalGlob.cinematicRate);
+        alSourceQueueBuffers(oalGlob.cinematicSource, 1, &freeBuffer);
+    }
+
+    // 3. Kickstart playback if the video decoder lagged and OpenAL starved
+    ALint state;
+    alGetSourcei(oalGlob.cinematicSource, AL_SOURCE_STATE, &state);
+    alGetSourcei(oalGlob.cinematicSource, AL_BUFFERS_QUEUED, &queued);
+    
+    if ((state == AL_STOPPED || state == AL_INITIAL) && queued > 0) {
+        alSourcePlay(oalGlob.cinematicSource);
+    }
+}
+
+void __cdecl SND_CinematicStopAudio()
+{
+    if (!oalGlob.cinematicActive) return;
+
+    alSourceStop(oalGlob.cinematicSource);
+    alSourcei(oalGlob.cinematicSource, AL_BUFFER, 0);
+
+    alDeleteSources(1, &oalGlob.cinematicSource);
+    alDeleteBuffers(NUM_STREAM_BUFFERS, oalGlob.cinematicBuffers);
+
+    oalGlob.cinematicActive = false;
 }
 
 #endif // USE_OPENAL

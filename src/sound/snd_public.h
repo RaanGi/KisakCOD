@@ -643,6 +643,11 @@ struct LoadedSound *__cdecl SND_LoadSoundFile(const char *name);
 void SND_FreeLoadedSound(LoadedSound *loadSnd);
 #endif
 
+// --- Cinematic Audio Streaming API ---
+void __cdecl SND_CinematicInitAudio(int rate, int channels, int bits);
+void __cdecl SND_CinematicPushAudio(const uint8_t* pcmData, size_t bytes);
+void __cdecl SND_CinematicStopAudio();
+
 extern const dvar_t *snd_cinematicVolumeScale;
 extern const dvar_t *snd_enable3D;
 extern const dvar_t *snd_enableEq;
