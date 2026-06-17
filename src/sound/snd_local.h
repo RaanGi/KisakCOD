@@ -112,6 +112,7 @@ struct OalStream {
     ALenum format;
     int rate;
     bool isLooping;
+    bool isEOF;
     bool active;
 };
 

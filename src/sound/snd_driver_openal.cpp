@@ -357,7 +357,8 @@ int __cdecl SND_StartAlias2DSample(SndStartAliasInfo *startAliasInfo, int *pChan
         alSourcePlay(source);
     }
 
-    int total_msec = (sound->info.samples * 1000) / sound->info.rate;
+    // Cast to 64-bit before multiplying to prevent overflow on long music tracks!
+    int total_msec = (int)(((uint64_t)sound->info.samples * 1000) / sound->info.rate);
     int start_msec = 0;
 
     SND_SetChannelStartInfo(index, startAliasInfo);
@@ -403,7 +404,8 @@ int __cdecl SND_StartAlias3DSample(SndStartAliasInfo *startAliasInfo, int *pChan
         alSourcePlay(source);
     }
 
-    int total_msec = (sound->info.samples * 1000) / sound->info.rate;
+    // Cast to 64-bit before multiplying to prevent overflow on long music tracks!
+    int total_msec = (int)(((uint64_t)sound->info.samples * 1000) / sound->info.rate);
     int start_msec = 0; 
 
     SND_SetChannelStartInfo(index, startAliasInfo);
@@ -491,6 +493,7 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo* startAliasInfo, int
     }
 
     stream->isLooping = ((startAliasInfo->alias0->flags & 1) != 0);
+    stream->isEOF = false;
 
     // Initial Buffer Queueing
     for (int i = 0; i < NUM_STREAM_BUFFERS; i++) {
@@ -543,7 +546,8 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo* startAliasInfo, int
     alSourcePlay(stream->source);
     stream->active = true;
 
-    int total_msec = (totalFrames * 1000) / stream->rate;
+    // Force 64-bit math so long music tracks don't overflow the 48-second limit!
+    int total_msec = (int)(((uint64_t)totalFrames * 1000) / stream->rate);
     SND_SetChannelStartInfo(index, startAliasInfo);
     SND_SetSoundFileChannelInfo(index, (stream->format == AL_FORMAT_STEREO16 ? 2 : 1), stream->rate, total_msec, 0, SFLS_LOADED);
 
@@ -1216,7 +1220,10 @@ void __cdecl SND_UpdateStreamChannel(int i, int frametime)
                     // Trigger a re-read immediately
                     if (stream->streamType == 1) framesRead = drmp3_read_pcm_frames_s16(&stream->mp3Decoder, framesToRead, (drmp3_int16*)chunkBuffer);
                     else if (stream->streamType == 2) framesRead = drwav_read_pcm_frames_s16(&stream->wavDecoder, framesToRead, (drwav_int16*)chunkBuffer);
-                } 
+                } else {
+                    // Mark the file as genuinely finished!
+                    stream->isEOF = true; 
+                }
             }
 
             // Queue data if available (this naturally terminates OpenAL queues upon true EOF)
@@ -1241,7 +1248,7 @@ void __cdecl SND_UpdateStreamChannel(int i, int frametime)
         // 3. True Engine Teardown
         bool chainTimeReached = (chaninfo->alias0->chainAliasName && (chaninfo->totalMsec + chaninfo->startTime - g_snd.time <= 0));
         
-        if ((state == AL_STOPPED && queued == 0) || chainTimeReached) {
+        if ((state == AL_STOPPED && stream->isEOF) || chainTimeReached) {
             SND_StopChannelAndPlayChainAlias(i);
         } else {
             // Keep volume synced dynamically
