@@ -141,6 +141,7 @@ struct OalLocal {
 
     // 2 banks (for lerping/saving), 3 bands, 64 entity channels
     SndEqParams eqParams[2][3][64];
+    float eqLerp;
 
     ALuint cinematicSource;
     ALuint cinematicBuffers[NUM_STREAM_BUFFERS];

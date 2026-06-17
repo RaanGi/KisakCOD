@@ -640,40 +640,61 @@ void __cdecl SND_UpdateEqs()
         
         for (int band = 0; band < 3; ++band)
         {
-            // Read from our new native OpenAL state buffer
-            SndEqParams& eq = oalGlob.eqParams[0][band][entchannel];
+            SndEqParams* eq0 = &oalGlob.eqParams[0][band][entchannel];
+            SndEqParams* eq1 = &oalGlob.eqParams[1][band][entchannel];
 
-            if (eq.enabled)
-            {
-                hasActiveBands = true;
+            // If neither bank is enabled for this band, skip it
+            if (!eq0->enabled && !eq1->enabled) continue;
+
+            hasActiveBands = true;
+            
+            // 1. LERP the parameters mathematically
+            float lerp = oalGlob.eqLerp;
+            float freq = eq0->freq + (eq1->freq - eq0->freq) * lerp;
+            float gain_db = eq0->gain + (eq1->gain - eq0->gain) * lerp;
+            float q = eq0->q + (eq1->q - eq0->q) * lerp;
+            
+            int type = (lerp >= 0.5f && eq1->enabled) ? eq1->type : eq0->type;
+
+            // 2. Convert Decibels (-24 to +24) to Linear Amplitude (0.126 to 7.94)
+            float linearGain = powf(10.0f, gain_db / 20.0f);
+            if (linearGain < 0.126f) linearGain = 0.126f;
+            if (linearGain > 7.94f)  linearGain = 7.94f;
+
+            // 3. Convert Q to OpenAL Width (0.01 to 1.0)
+            float width = (q > 0.01f) ? (1.0f / q) : 1.0f;
+            if (width < 0.01f) width = 0.01f;
+            if (width > 1.0f)  width = 1.0f;
+
+            // 4. Map the Types
+            // 0 = LowPass, 2 = LowShelf
+            if (type == 0 || type == 2) { 
+                if (freq < 50.0f) freq = 50.0f;
+                if (freq > 800.0f) freq = 800.0f;
+                alEffectf(effect, AL_EQUALIZER_LOW_GAIN, linearGain);
+                alEffectf(effect, AL_EQUALIZER_LOW_CUTOFF, freq);
+            } 
+            // 1 = HighPass, 3 = HighShelf
+            else if (type == 1 || type == 3) {
+                if (freq < 4000.0f) freq = 4000.0f;
+                if (freq > 16000.0f) freq = 16000.0f;
+                alEffectf(effect, AL_EQUALIZER_HIGH_GAIN, linearGain);
+                alEffectf(effect, AL_EQUALIZER_HIGH_CUTOFF, freq);
+            } 
+            // 4 = Bell (Peaking)
+            else if (type == 4) {
+                if (freq < 200.0f) freq = 200.0f;
+                if (freq > 3000.0f) freq = 3000.0f;
                 
-                float gain = eq.gain; 
-                float freq = eq.freq;
-                float width = (eq.q > 0.0f) ? (1.0f / eq.q) : 1.0f;
-
-                if (freq < 500.0f || eq.type == 0) {
-                    alEffectf(effect, AL_EQUALIZER_LOW_GAIN, gain);
-                    alEffectf(effect, AL_EQUALIZER_LOW_CUTOFF, freq);
-                } 
-                else if (freq > 4000.0f || eq.type == 2) {
-                    alEffectf(effect, AL_EQUALIZER_HIGH_GAIN, gain);
-                    alEffectf(effect, AL_EQUALIZER_HIGH_CUTOFF, freq);
-                } 
-                else {
-                    if (band == 0) {
-                        alEffectf(effect, AL_EQUALIZER_MID1_GAIN, gain);
-                        alEffectf(effect, AL_EQUALIZER_MID1_CENTER, freq);
-                        alEffectf(effect, AL_EQUALIZER_MID1_WIDTH, width);
-                    } else if (band == 1) {
-                        alEffectf(effect, AL_EQUALIZER_MID2_GAIN, gain);
-                        alEffectf(effect, AL_EQUALIZER_MID2_CENTER, freq);
-                        alEffectf(effect, AL_EQUALIZER_MID2_WIDTH, width);
-                    } else {
-                        // Band 2 shares MID2 if it's in the mid-range, but 0 and 1 are now separate
-                        alEffectf(effect, AL_EQUALIZER_MID2_GAIN, gain);
-                        alEffectf(effect, AL_EQUALIZER_MID2_CENTER, freq);
-                        alEffectf(effect, AL_EQUALIZER_MID2_WIDTH, width);
-                    }
+                // Route to MID1 or MID2 depending on the band slot to avoid overwriting
+                if (band == 0) {
+                    alEffectf(effect, AL_EQUALIZER_MID1_GAIN, linearGain);
+                    alEffectf(effect, AL_EQUALIZER_MID1_CENTER, freq);
+                    alEffectf(effect, AL_EQUALIZER_MID1_WIDTH, width);
+                } else {
+                    alEffectf(effect, AL_EQUALIZER_MID2_GAIN, linearGain);
+                    alEffectf(effect, AL_EQUALIZER_MID2_CENTER, freq);
+                    alEffectf(effect, AL_EQUALIZER_MID2_WIDTH, width);
                 }
             }
         }
@@ -695,7 +716,6 @@ void __cdecl SND_UpdateEqs()
 void __cdecl SND_SetEqParams(uint32_t entchannel, int eqIndex, uint32_t band, SND_EQTYPE type, float gain, float freq, float q)
 {
     if (entchannel >= 64 || band >= 3 || eqIndex >= 2) return;
-    
     oalGlob.eqParams[eqIndex][band][entchannel].enabled = 1;
     oalGlob.eqParams[eqIndex][band][entchannel].gain = gain;
     oalGlob.eqParams[eqIndex][band][entchannel].freq = freq;
@@ -1273,7 +1293,17 @@ void __cdecl SND_UpdateStreamChannel(int i, int frametime)
 }
 
 #ifdef KISAK_SP
-void SND_SetEqLerp(double lerp) {}
+void SND_SetEqLerp(double lerp) 
+{
+    if (oalGlob.eqLerp == (float)lerp) return;
+    
+    oalGlob.eqLerp = (float)lerp;
+    
+    // Mark all active EQs as dirty so they recalculate the interpolation this frame
+    for (int i = 0; i < 64; i++) {
+        if (oalGlob.eqActive[i]) oalGlob.eqDirty[i] = true;
+    }
+}
 #endif
 
 struct _DIG_DRIVER* __cdecl MSS_GetDriver(void) { 
