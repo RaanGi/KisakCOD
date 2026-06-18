@@ -1,10 +1,14 @@
 #include "snd_local.h"
 #include "snd_public.h"
+#ifndef USE_OPENAL
+#include "snd_mss_internal.h"
+#endif
 #include <qcommon/mem_track.h>
 #include <universal/q_shared.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/cmd.h>
 #include <universal/com_sndalias.h>
+#include <universal/com_files.h>
 #include <universal/com_memory.h>
 #include <database/database.h>
 
@@ -4850,75 +4854,28 @@ void __cdecl SND_SetHWND(HWND hwnd)
 #endif
 }
 
-void __cdecl SND_SetData(MssSoundCOD4 *mssSound, void *srcData)
+LoadedSound *__cdecl SND_LoadSoundFile(const char *name)
 {
-#ifdef USE_OPENAL
-    if (!mssSound || !srcData || mssSound->info.data_len <= 0) return;
+    void *buffer; // [esp+4h] [ebp-10Ch] BYREF
+    char realname[256]; // [esp+8h] [ebp-108h] BYREF
+    LoadedSound *loadSnd; // [esp+10Ch] [ebp-4h]
 
-    // 1. Map the engine's audio format to OpenAL standard formats
-    ALenum format = AL_FORMAT_MONO16; // Safe default
-    if (mssSound->info.channels == 1 && mssSound->info.bits == 8)  format = AL_FORMAT_MONO8;
-    else if (mssSound->info.channels == 1 && mssSound->info.bits == 16) format = AL_FORMAT_MONO16;
-    else if (mssSound->info.channels == 2 && mssSound->info.bits == 8)  format = AL_FORMAT_STEREO8;
-    else if (mssSound->info.channels == 2 && mssSound->info.bits == 16) format = AL_FORMAT_STEREO16;
-
-    // 2. Generate the hardware buffer and upload the raw PCM data
-    alGenBuffers(1, &mssSound->oalBuffer);
-    alBufferData(mssSound->oalBuffer, format, srcData, mssSound->info.data_len, mssSound->info.rate);
-    
-    // Note: We do not need to set mssSound->info.data_ptr for OpenAL, 
-    // because the hardware audio driver has taken full ownership of the buffer.
-
-#else // ORIGINAL MILES SOUND SYSTEM LOGIC BELOW
-
-    // KISAKTODO: double check MssSound struct usage here. It looks 'okay' at first glance
-    _AILMIXINFO mixinfo; // [esp+Ch] [ebp-80h] BYREF
-    int digitalFormat; // [esp+88h] [ebp-4h]
-
-    if (mssSound->info.rate > g_snd.playback_rate && mssSound->info.format != 17)
+    if (IsFastFileLoad())
+        MyAssertHandler(".\\win32\\snd_driver_load_obj.cpp", 175, 0, "%s", "IsObjFileLoad()");
+    if (!name)
+        MyAssertHandler(".\\win32\\snd_driver_load_obj.cpp", 176, 0, "%s", "name");
+    Com_sprintf(realname, 0x100u, "sound/%s", name);
+    if (FS_ReadFile(realname, &buffer) >= 0)
     {
-        memset(&mixinfo, 0, sizeof(mixinfo));
-        // LWSS Add: sound struct conversion
-        mixinfo.Info.format = mssSound->info.format;
-        mixinfo.Info.data_ptr = mssSound->info.data_ptr;
-        mixinfo.Info.data_len = mssSound->info.data_len;
-        mixinfo.Info.rate = mssSound->info.rate;
-        mixinfo.Info.bits = mssSound->info.bits;
-        mixinfo.Info.channels = mssSound->info.channels;
-        mixinfo.Info.channel_mask = ~0U; // NEW!
-        mixinfo.Info.samples = mssSound->info.samples;
-        mixinfo.Info.block_size = mssSound->info.block_size;
-        mixinfo.Info.initial_ptr = mssSound->info.initial_ptr;
-
-        mixinfo.Info.data_ptr = srcData;
-        mixinfo.Info.initial_ptr = srcData;
-        while (mssSound->info.rate > g_snd.playback_rate)
-        {
-            //mssSound->info.rate >>= 1;
-            mssSound->info.rate /= 2;
-            //mssSound->info.samples >>= 1;
-            mssSound->info.samples /= 2;
-        }
-        digitalFormat = MSS_DigitalFormatType(mssSound->info.format, mssSound->info.bits, mssSound->info.channels);
-        mssSound->info.data_len = AIL_size_processed_digital_audio(mssSound->info.rate, digitalFormat, 1, &mixinfo);
-        mssSound->data = MSS_Alloc(mssSound->info.data_len, mssSound->info.rate);
-        AIL_process_digital_audio(
-            mssSound->data,
-            mssSound->info.data_len,
-            mssSound->info.rate,
-            mssSound->info.format,
-            1,
-            &mixinfo);
+        loadSnd = SND_LoadFromBuffer(buffer, name);
+        FS_FreeFile((char*)buffer);
+        return loadSnd;
     }
     else
     {
-        mssSound->data = MSS_Alloc(mssSound->info.data_len, mssSound->info.rate);
-        Com_Memcpy(mssSound->data, srcData, mssSound->info.data_len);
+        Com_PrintError(1, "ERROR: Sound file '%s' not found\n", realname);
+        return 0;
     }
-    mssSound->info.data_ptr = mssSound->data;
-    mssSound->info.initial_ptr = mssSound->data;
-
-#endif
 }
 
 #ifdef KISAK_SP
@@ -5069,25 +5026,3 @@ int SND_FindPlaybackId(const snd_alias_t *sndEnt, const char *aliasName)
 }
 
 #endif // KISAK_SP
-
-#ifndef KISAK_DEDICATED
-void __cdecl SND_FreeLoadedSound(LoadedSound *loadSnd)
-{
-    if (!loadSnd)
-        return;
-
-#ifdef USE_OPENAL
-    if (loadSnd->sound.oalBuffer != 0)
-    {
-        alDeleteBuffers(1, &loadSnd->sound.oalBuffer);
-        loadSnd->sound.oalBuffer = 0;
-    }
-#else
-    if (loadSnd->sound.data)
-    {
-        Z_Free(loadSnd->sound.data, 15);
-        loadSnd->sound.data = nullptr;
-    }
-#endif
-}
-#endif // KISAK_DEDICATED

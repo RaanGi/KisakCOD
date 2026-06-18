@@ -470,7 +470,6 @@ if(USE_OPENAL)
         "${SRC_DIR}/sound/snd_driver_openal.cpp"
         "${SRC_DIR}/sound/snd_mp3_impl.c"
         "${SRC_DIR}/sound/snd_wav_impl.c"
-        "${SRC_DIR}/sound/snd_driver_load_obj.cpp"
         "${SRC_DIR}/sound/snd_local.h"
         "${SRC_DIR}/sound/snd_public.h"
         "${SRC_DIR}/sound/snd_utils.cpp"
@@ -478,9 +477,9 @@ if(USE_OPENAL)
 else()
     set(SOUND
         "${SRC_DIR}/sound/snd.cpp"
-        "${SRC_DIR}/sound/snd_driver.cpp"
-        "${SRC_DIR}/sound/snd_driver_load_obj.cpp"
+        "${SRC_DIR}/sound/snd_driver_mss.cpp"
         "${SRC_DIR}/sound/snd_local.h"
+        "${SRC_DIR}/sound/snd_mss_internal.h"
         "${SRC_DIR}/sound/snd_mss.cpp"
         "${SRC_DIR}/sound/snd_public.h"
         "${SRC_DIR}/sound/snd_utils.cpp"

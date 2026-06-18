@@ -527,7 +527,11 @@ char __cdecl R_Cinematic_StartPlayback_Now(const char *filename, uint32_t playba
     R_Cinematic_CheckBinkError();
     BinkSetMemory(R_Cinematic_Bink_Alloc, R_Cinematic_Bink_Free);
     R_Cinematic_CheckBinkError();
+#ifdef USE_OPENAL
+    Driver = nullptr;
+#else
     Driver = MSS_GetDriver();
+#endif
     BinkSetSoundSystem(BinkOpenMiles, (uint32_t)Driver);
     R_Cinematic_CheckBinkError();
     BinkSetSoundTrack(5, TrackIDsToPlay);

@@ -1,11 +1,13 @@
 #include "snd_local.h"
 #include "snd_public.h"
+#include "snd_mss_internal.h"
 #include <qcommon/mem_track.h>
 #include <msslib/mss.h>
 #include <qcommon/qcommon.h>
 #include <universal/com_files.h>
 #include <gfx_d3d/r_cinematic.h>
 #include <universal/com_sndalias.h>
+#include <universal/com_memory.h>
 #include <universal/profile.h>
 
 #ifdef KISAK_MP
@@ -1895,3 +1897,98 @@ void SND_SetEqLerp(double lerp)
 #endif
 }
 #endif
+
+void __cdecl SND_SetData(MssSoundCOD4 *mssSound, void *srcData)
+{
+    // KISAKTODO: double check MssSound struct usage here. It looks 'okay' at first glance
+    _AILMIXINFO mixinfo; // [esp+Ch] [ebp-80h] BYREF
+    int digitalFormat; // [esp+88h] [ebp-4h]
+
+    if (mssSound->info.rate > g_snd.playback_rate && mssSound->info.format != 17)
+    {
+        memset(&mixinfo, 0, sizeof(mixinfo));
+        // LWSS Add: sound struct conversion
+        mixinfo.Info.format = mssSound->info.format;
+        mixinfo.Info.data_ptr = mssSound->info.data_ptr;
+        mixinfo.Info.data_len = mssSound->info.data_len;
+        mixinfo.Info.rate = mssSound->info.rate;
+        mixinfo.Info.bits = mssSound->info.bits;
+        mixinfo.Info.channels = mssSound->info.channels;
+        mixinfo.Info.channel_mask = ~0U; // NEW!
+        mixinfo.Info.samples = mssSound->info.samples;
+        mixinfo.Info.block_size = mssSound->info.block_size;
+        mixinfo.Info.initial_ptr = mssSound->info.initial_ptr;
+
+        mixinfo.Info.data_ptr = srcData;
+        mixinfo.Info.initial_ptr = srcData;
+        while (mssSound->info.rate > g_snd.playback_rate)
+        {
+            //mssSound->info.rate >>= 1;
+            mssSound->info.rate /= 2;
+            //mssSound->info.samples >>= 1;
+            mssSound->info.samples /= 2;
+        }
+        digitalFormat = MSS_DigitalFormatType(mssSound->info.format, mssSound->info.bits, mssSound->info.channels);
+        mssSound->info.data_len = AIL_size_processed_digital_audio(mssSound->info.rate, digitalFormat, 1, &mixinfo);
+        mssSound->data = MSS_Alloc(mssSound->info.data_len, mssSound->info.rate);
+        AIL_process_digital_audio(
+            mssSound->data,
+            mssSound->info.data_len,
+            mssSound->info.rate,
+            mssSound->info.format,
+            1,
+            &mixinfo);
+    }
+    else
+    {
+        mssSound->data = MSS_Alloc(mssSound->info.data_len, mssSound->info.rate);
+        Com_Memcpy(mssSound->data, srcData, mssSound->info.data_len);
+    }
+    mssSound->info.data_ptr = mssSound->data;
+    mssSound->info.initial_ptr = mssSound->data;
+}
+
+LoadedSound* __cdecl SND_LoadFromBuffer(void* buffer, const char* soundName)
+{
+    if (!buffer) return 0;
+    
+    _AILSOUNDINFO info; // [esp+8h] [ebp-28h] BYREF
+    LoadedSound *loadSnd; // [esp+2Ch] [ebp-4h]
+
+    if (!buffer)
+        MyAssertHandler(".\\win32\\snd_driver_load_obj.cpp", 134, 0, "%s", "buffer");
+    if (AIL_WAV_info(buffer, &info))
+    {
+        if (info.data_len)
+        {
+            loadSnd = (LoadedSound*)Hunk_Alloc(0x2Cu, "SND_LoadFromBuffer", 15);
+            loadSnd->name = soundName;
+            qmemcpy(&loadSnd->sound, &info, 0x24u);
+            SND_SetData(&loadSnd->sound, (void*)info.data_ptr);
+            return loadSnd;
+        }
+        else
+        {
+            Com_PrintError(1, "ERROR: Sound file '%s' is zero length, invalid\n", soundName);
+            return 0;
+        }
+    }
+    else
+    {
+        Com_PrintError(1, "ERROR: Sound file '%s' is in an invalid or corrupted format\n", soundName);
+        return 0;
+    }
+}
+
+#ifndef KISAK_DEDICATED
+void __cdecl SND_FreeLoadedSound(LoadedSound *loadSnd)
+{
+    if (!loadSnd)
+        return;
+    if (loadSnd->sound.data)
+    {
+        Z_Free(loadSnd->sound.data, 15);
+        loadSnd->sound.data = nullptr;
+    }
+}
+#endif // KISAK_DEDICATED

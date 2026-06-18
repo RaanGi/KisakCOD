@@ -1,5 +1,6 @@
 #include "snd_local.h"
 #include "snd_public.h"
+#include "snd_mss_internal.h"
 #include <universal/com_files.h>
 #include <qcommon/qcommon.h>
 #include <universal/com_memory.h>

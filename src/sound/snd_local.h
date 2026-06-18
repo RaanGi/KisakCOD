@@ -23,9 +23,9 @@ static LPALGENFILTERS alGenFilters = nullptr;
 static LPALFILTERI alFilteri = nullptr;
 static LPALFILTERF alFilterf = nullptr;
 static LPALDELETEFILTERS alDeleteFilters = nullptr;
-#endif
-
+#else
 #include <msslib/mss.h>
+#endif
 #include "snd_public.h"
 
 static const char *snd_outputConfigurationStrings[6] = { "Windows default", "Mono", "Stereo", "4 speakers", "5.1 speakers", NULL }; // idb
@@ -56,18 +56,6 @@ struct snd_save_stream_t // sizeof=0x20
     float org[3];                       // ...
 };
 
-struct MssFileHandle // sizeof=0x9C
-{                                       // ...
-    uint32_t id;
-    MssFileHandle *next;
-    int handle;
-    char fileName[128];
-    uint32_t hashCode;
-    int offset;
-    int fileOffset;
-    int fileLength;
-};
-
 struct SndEqParams // sizeof=0x14
 {                                       // ...
     SND_EQTYPE type;                    // ...
@@ -84,86 +72,6 @@ struct snd_eqoverlay_info_t // sizeof=0x1C
 {                                       // ...
     SndEqParams *params[2][3];
     float lerp;                         // ...
-};
-
-struct MssEqInfo // sizeof=0xF00
-{                                       // ...
-    SndEqParams params[3][64];
-};
-
-typedef struct _SAMPLE FAR *HSAMPLE;           // Handle to sample
-
-#ifdef USE_OPENAL
-
-// Represents a single streamed audio channel
-struct OalStream {
-    ALuint source;
-    ALuint buffers[NUM_STREAM_BUFFERS];
-    
-    char filename[256];
-    int fileHandle;        // Engine VFS handle
-    int dataStartOffset;   // Where the PCM data begins after the WAV header
-    int dataBytesLeft;     // Bytes remaining in the file
-    int dataLength;        // Total bytes of PCM data
-    drmp3 mp3Decoder;
-    drwav wavDecoder;
-    int streamType;        // 0 = Empty, 1 = MP3, 2 = WAV/ADPCM
-    
-    ALenum format;
-    int rate;
-    bool isLooping;
-    bool isEOF;
-    bool active;
-};
-
-// We need a global struct for OpenAL state to replace milesGlob hardware pointers
-struct OalLocal {
-    ALCdevice* device;
-    ALCcontext* context;
-    bool isMultiChannel;
-
-    ALuint sources[40];       // Replaces milesGlob.handle_sample (max_2D + max_3D)
-    OalStream streams[13]; // Replaces milesGlob.handle_stream
-
-    bool efxSupported;
-    
-    // CoD4 supports up to 64 entchannels (0-63).
-    // We create a dedicated EQ bus for each one.
-    ALuint eqAuxSlots[64]; 
-    ALuint eqEffects[64];
-    bool eqActive[64];
-    bool eqDirty[64];
-    ALuint muteFilter;
-
-    ALuint reverbAuxSlot;
-    ALuint reverbEffect;
-    int currentRoomType;
-
-    // 2 banks (for lerping/saving), 3 bands, 64 entity channels
-    SndEqParams eqParams[2][3][64];
-    float eqLerp;
-
-    ALuint cinematicSource;
-    ALuint cinematicBuffers[NUM_STREAM_BUFFERS];
-    bool cinematicActive;
-    ALenum cinematicFormat;
-    uint32_t cinematicRate;
-    uint32_t cinematicWriteIdx;
-};
-#endif
-struct MssLocal // sizeof=0x26D0
-{                                       // ...
-    _DIG_DRIVER *driver;                // ...
-    HSAMPLE handle_sample[40];         // ...
-    _STREAM *handle_stream[13];
-    MssEqInfo eq[2];                    // ...
-    uint32_t eqFilter;              // ...
-    MssFileHandle fileHandle[13];
-    MssFileHandle *freeFileHandle;
-    bool isMultiChannel;                // ...
-    // padding byte
-    // padding byte
-    // padding byte
 };
 
 // snd_driver
@@ -235,12 +143,14 @@ void __cdecl SND_Update2DChannel(int i, int frametime);
 void __cdecl SND_Update3DChannel(int i, int frametime);
 void __cdecl SND_UpdateStreamChannel(int i, int frametime);
 
+LoadedSound* __cdecl SND_LoadFromBuffer(void* buffer, const char* soundName);
+
 #ifdef KISAK_SP
 void SND_SetEqLerp(double lerp);
 #endif
 
 
-
+#ifndef USE_OPENAL
 // snd_mss
 uint32_t __stdcall MSS_FileOpenCallback(const MSS_FILE *pszFilename, UINTa *phFileHandle);
 void __stdcall MSS_FileCloseCallback(UINTa hFileHandle);
@@ -257,14 +167,12 @@ void MSS_ShutdownCleanup();
 double __cdecl MSS_GetWetLevel(const snd_alias_t *pAlias);
 void __cdecl MSS_ApplyEqFilter(_SAMPLE *s, int entchannel);
 void __cdecl MSS_ResumeSample(int i, int frametime);
-_DIG_DRIVER *__cdecl MSS_GetDriver();
+_DIG_DRIVER *__cdecl MSS_GetDriver(); 
 int __cdecl MSS_DigitalFormatType(int waveFormat, int bits, int channels);
 uint8_t *__cdecl MSS_Alloc(uint32_t bytes, uint32_t rate);
 uint8_t *__cdecl MSS_Alloc_LoadObj(uint32_t bytes, uint32_t rate);
 uint32_t *__cdecl MSS_Alloc_FastFile(int bytes);
-
-
-extern MssLocal milesGlob;
+#endif
 extern snd_local_t g_snd;
 
 extern const dvar_t *snd_khz;

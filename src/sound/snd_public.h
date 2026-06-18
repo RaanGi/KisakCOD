@@ -1,7 +1,9 @@
 #pragma once
 
 #include <qcommon/qcommon.h>
+//#ifndef USE_OPENAL  
 #include <msslib/mss.h>
+//#endif
 #include <gfx_d3d/fxprimitives.h>
 #include <universal/memfile.h>
 
@@ -87,9 +89,7 @@ struct MssSoundCOD4 // sizeof=0x28
     // passing the static_assert perfectly.
     union {
         uint8_t* data;          // Used by MSS to hold the PCM pointer
-#ifdef USE_OPENAL
         unsigned int oalBuffer; // Used by OpenAL to hold the ALuint hardware ID
-#endif
     };
 };
 // LWSS END
