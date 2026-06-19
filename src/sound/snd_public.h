@@ -1,9 +1,14 @@
 #pragma once
 
 #include <qcommon/qcommon.h>
-//#ifndef USE_OPENAL  
+#ifdef USE_OPENAL
+#ifndef _WINDOWS_
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif  
+#else
 #include <msslib/mss.h>
-//#endif
+#endif
 #include <gfx_d3d/fxprimitives.h>
 #include <universal/memfile.h>
 

@@ -6,6 +6,28 @@
 #include <universal/com_sndalias.h>
 #include <universal/com_memory.h>
 
+// Translate OpenAL errors to readable strings
+static const char* OAL_ErrorToString(ALenum error) {
+    switch (error) {
+        case AL_NO_ERROR: return "AL_NO_ERROR";
+        case AL_INVALID_NAME: return "AL_INVALID_NAME";
+        case AL_INVALID_ENUM: return "AL_INVALID_ENUM";
+        case AL_INVALID_VALUE: return "AL_INVALID_VALUE";
+        case AL_INVALID_OPERATION: return "AL_INVALID_OPERATION";
+        case AL_OUT_OF_MEMORY: return "AL_OUT_OF_MEMORY";
+        default: return "Unknown OpenAL Error";
+    }
+}
+
+#define OAL_CHECK_ERROR() \
+    do { \
+        ALenum alErr = alGetError(); \
+        if (alErr != AL_NO_ERROR) { \
+            Com_PrintError(9, "AUDIO ERROR: OpenAL faulted with %s at %s:%d\n", OAL_ErrorToString(alErr), __FILE__, __LINE__); \
+            MyAssertHandler(__FILE__, __LINE__, 0, "OpenAL Error: %s", OAL_ErrorToString(alErr)); \
+        } \
+    } while (0)
+
 // Represents a single streamed audio channel
 struct OalStream {
     ALuint source;
@@ -228,6 +250,8 @@ char __cdecl SND_InitDriver()
     }
     
     g_snd.ambient_track = 1;
+
+    OAL_CHECK_ERROR(); 
 
     Com_Printf(9, "OpenAL initialized successfully at %i Hz\n", hertz);
     return 1;
@@ -1103,7 +1127,10 @@ int __cdecl SND_GetStreamChannelLength(int index) {
 
 void __cdecl SND_Get2DChannelSaveInfo(int index, snd_save_2D_sample_t *info)
 {
-    if (index < 0 || index >= g_snd.max_2D_channels || !info) return;
+    if (index < 0 || index >= g_snd.max_2D_channels) {
+        MyAssertHandler(__FILE__, __LINE__, 0, "i doesn't index g_snd.max_2D_channels\n\t%i not in [0, %i)", index, g_snd.max_2D_channels);
+        return;
+    }
     
     ALuint source = oalGlob.sources[index];
     float secOffset = 0.0f;
@@ -1119,12 +1146,20 @@ void __cdecl SND_Get2DChannelSaveInfo(int index, snd_save_2D_sample_t *info)
 
 void __cdecl SND_Set2DChannelFromSaveInfo(int index, snd_save_2D_sample_t *info)
 {
-    if (index >= 0 && index < g_snd.max_2D_channels && info) SND_Set2DChannelVolume(index, info->volume * g_snd.volume);
+    if (index < 0 || index >= g_snd.max_2D_channels) {
+        MyAssertHandler(__FILE__, __LINE__, 0, "i doesn't index g_snd.max_2D_channels\n\t%i not in [0, %i)", index, g_snd.max_2D_channels);
+        return;
+    }
+    
+    SND_Set2DChannelVolume(index, info->volume * g_snd.volume);
 }
 
 void __cdecl SND_Get3DChannelSaveInfo(int index, snd_save_3D_sample_t *info)
 {
-    if (index < 8 || index >= g_snd.max_3D_channels + 8 || !info) return;
+    if (index < g_snd.max_2D_channels || index >= (g_snd.max_2D_channels + g_snd.max_3D_channels)) {
+        MyAssertHandler(__FILE__, __LINE__, 0, "i doesn't index g_snd.max_3D_channels\n\t%i not in [%i, %i)", index, g_snd.max_2D_channels, g_snd.max_2D_channels + g_snd.max_3D_channels);
+        return;
+    }
     
     ALuint source = oalGlob.sources[index];
     float secOffset = 0.0f;
@@ -1141,7 +1176,12 @@ void __cdecl SND_Get3DChannelSaveInfo(int index, snd_save_3D_sample_t *info)
 
 void __cdecl SND_GetStreamChannelSaveInfo(int index, snd_save_stream_t *info)
 {
-    if (index < 40 || index >= g_snd.max_stream_channels + 40 || !info) return;
+    int streamStartIndex = g_snd.max_2D_channels + g_snd.max_3D_channels;
+    if (index < streamStartIndex || index >= (streamStartIndex + g_snd.max_stream_channels)) {
+        MyAssertHandler(__FILE__, __LINE__, 0, "i doesn't index g_snd.max_stream_channels\n\t%i not in [%i, %i)", index, streamStartIndex, streamStartIndex + g_snd.max_stream_channels);
+        return;
+    }
+
     int localIdx = index - (g_snd.max_2D_channels + g_snd.max_3D_channels);
     OalStream* stream = &oalGlob.streams[localIdx];
 
@@ -1183,7 +1223,11 @@ void __cdecl SND_DriverPostUpdate()
 
 void __cdecl SND_Update2DChannel(int i, int frametime)
 {
-    if (i < 0 || i >= g_snd.max_2D_channels) return;
+    if (i < 0 || i >= g_snd.max_2D_channels) {
+        MyAssertHandler(__FILE__, __LINE__, 0, "i doesn't index g_snd.max_2D_channels\n\t%i not in [0, %i)", i, g_snd.max_2D_channels);
+        return;
+    }
+
     snd_channel_info_t *chaninfo = &g_snd.chaninfo[i];
     
     if (!chaninfo->paused && chaninfo->alias0)
@@ -1220,7 +1264,11 @@ void __cdecl SND_Update2DChannel(int i, int frametime)
 
 void __cdecl SND_Update3DChannel(int i, int frametime)
 {
-    if (i < 8 || i >= g_snd.max_3D_channels + 8) return;
+    if (i < g_snd.max_2D_channels || i >= (g_snd.max_2D_channels + g_snd.max_3D_channels)) {
+        MyAssertHandler(__FILE__, __LINE__, 0, "i doesn't index g_snd.max_3D_channels\n\t%i not in [%i, %i)", i, g_snd.max_2D_channels, g_snd.max_2D_channels + g_snd.max_3D_channels);
+        return;
+    }
+
     snd_channel_info_t *chaninfo = &g_snd.chaninfo[i];
     
     if (!chaninfo->paused && chaninfo->alias0)
@@ -1258,7 +1306,11 @@ void __cdecl SND_Update3DChannel(int i, int frametime)
 
 void __cdecl SND_UpdateStreamChannel(int i, int frametime)
 {
-    if (i < 40 || i >= g_snd.max_stream_channels + 40) return;
+    int streamStartIndex = g_snd.max_2D_channels + g_snd.max_3D_channels;
+    if (i < streamStartIndex || i >= (streamStartIndex + g_snd.max_stream_channels)) {
+        MyAssertHandler(__FILE__, __LINE__, 0, "i doesn't index g_snd.max_stream_channels\n\t%i not in [%i, %i)", i, streamStartIndex, streamStartIndex + g_snd.max_stream_channels);
+        return;
+    }
     
     snd_channel_info_t *chaninfo = &g_snd.chaninfo[i];
     int localIdx = i - (g_snd.max_2D_channels + g_snd.max_3D_channels);
