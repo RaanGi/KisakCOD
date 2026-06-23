@@ -27,6 +27,7 @@ static const char* OAL_ErrorToString(ALenum error) {
             MyAssertHandler(__FILE__, __LINE__, 0, "OpenAL Error: %s", OAL_ErrorToString(alErr)); \
         } \
     } while (0)
+#define OAL_CLEAR_ERROR() do { while(alGetError() != AL_NO_ERROR); } while(0)
 
 // Represents a single streamed audio channel
 struct OalStream {
@@ -195,7 +196,9 @@ char __cdecl SND_InitDriver()
         alDeleteFilters = (LPALDELETEFILTERS)alGetProcAddress("alDeleteFilters");
 
         // 3. Generate Hardware DSP Busses (One for each entchannel)
-        alGenAuxiliaryEffectSlots(64, oalGlob.eqAuxSlots);
+        alGenAuxiliaryEffectSlots(63, oalGlob.eqAuxSlots);
+        // Map the 64th entity channel (index 63) to share the 63rd hardware slot (index 62)
+        oalGlob.eqAuxSlots[63] = oalGlob.eqAuxSlots[62];
         alGenEffects(64, oalGlob.eqEffects);
 
         alGenFilters(1, &oalGlob.muteFilter);
@@ -262,21 +265,28 @@ void __cdecl SND_ShutdownDriver()
     R_Cinematic_StopPlayback();
     R_Cinematic_SyncNow();
 
-    if (oalGlob.efxSupported) {
-        alDeleteAuxiliaryEffectSlots(64, oalGlob.eqAuxSlots);
-        alDeleteEffects(64, oalGlob.eqEffects);
-        alDeleteFilters(1, &oalGlob.muteFilter);
-        alDeleteAuxiliaryEffectSlots(1, &oalGlob.reverbAuxSlot);
-        alDeleteEffects(1, &oalGlob.reverbEffect);
+    OAL_CLEAR_ERROR();
+
+    // 1. Detach ALL Sources from everything (Buffers and EFX slots)
+    for (int i = 0; i < g_snd.max_2D_channels + g_snd.max_3D_channels; i++) {
+        alSourceStop(oalGlob.sources[i]);
+        alSourcei(oalGlob.sources[i], AL_BUFFER, 0); // Unqueue buffers
+        if (oalGlob.efxSupported) {
+            alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+            alSource3i(oalGlob.sources[i], AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 1, AL_FILTER_NULL);
+        }
     }
 
-    alDeleteSources(g_snd.max_2D_channels + g_snd.max_3D_channels, oalGlob.sources);
-    
+    // 2. Detach and Cleanup ALL Streams
     for (int i = 0; i < g_snd.max_stream_channels; i++) {
         OalStream* stream = &oalGlob.streams[i];
-        
+
         alSourceStop(stream->source);
-        alSourcei(stream->source, AL_BUFFER, 0);
+        alSourcei(stream->source, AL_BUFFER, 0); // Unqueue buffers
+        if (oalGlob.efxSupported) {
+            alSource3i(stream->source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 0, AL_FILTER_NULL);
+            alSource3i(stream->source, AL_AUXILIARY_SEND_FILTER, AL_EFFECTSLOT_NULL, 1, AL_FILTER_NULL);
+        }
 
         if (stream->streamType == 1) drmp3_uninit(&stream->mp3Decoder);
         else if (stream->streamType == 2) drwav_uninit(&stream->wavDecoder);
@@ -290,6 +300,21 @@ void __cdecl SND_ShutdownDriver()
         alDeleteSources(1, &stream->source);
         alDeleteBuffers(NUM_STREAM_BUFFERS, stream->buffers);
     }
+
+    OAL_CHECK_ERROR(); // Ensure all detachments were successful
+
+    // 3. Now we can safely delete the EFX hardware objects
+    if (oalGlob.efxSupported) {
+        alDeleteAuxiliaryEffectSlots(63, oalGlob.eqAuxSlots);
+        alDeleteEffects(64, oalGlob.eqEffects);
+        alDeleteFilters(1, &oalGlob.muteFilter);
+        alDeleteAuxiliaryEffectSlots(1, &oalGlob.reverbAuxSlot);
+        alDeleteEffects(1, &oalGlob.reverbEffect);
+    }
+
+    alDeleteSources(g_snd.max_2D_channels + g_snd.max_3D_channels, oalGlob.sources);
+
+    OAL_CHECK_ERROR(); // Catch any final deletion memory leaks
 
     alcMakeContextCurrent(nullptr);
     if (oalGlob.context) alcDestroyContext(oalGlob.context);
@@ -444,7 +469,8 @@ int __cdecl SND_StartAlias2DSample(SndStartAliasInfo *startAliasInfo, int *pChan
     
     int playbackId = SND_AcquirePlaybackId(index, total_msec);
     if (playbackId != -1) SND_AddVoice(entchannel);
-    
+
+    OAL_CHECK_ERROR();
     return playbackId;
 }
 
@@ -492,6 +518,7 @@ int __cdecl SND_StartAlias3DSample(SndStartAliasInfo *startAliasInfo, int *pChan
     int playbackId = SND_AcquirePlaybackId(index, total_msec);
     if (playbackId != -1) SND_AddVoice(entchannel);
     
+    OAL_CHECK_ERROR();
     return playbackId;
 }
 
@@ -503,17 +530,22 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo* startAliasInfo, int
     int localIdx = index - (g_snd.max_2D_channels + g_snd.max_3D_channels);
     OalStream* stream = &oalGlob.streams[localIdx];
 
-    if (stream->active && stream->fileHandle) {
+    if (stream->active) {
         alSourceStop(stream->source);
-        alSourcei(stream->source, AL_BUFFER, 0);
-        
+        alSourcei(stream->source, AL_BUFFER, 0); // GUARANTEE queue is cleared
+
         if (stream->streamType == 1) drmp3_uninit(&stream->mp3Decoder);
         else if (stream->streamType == 2) drwav_uninit(&stream->wavDecoder);
         stream->streamType = 0;
-        
-        FS_FCloseFile(stream->fileHandle);
+
+        if (stream->fileHandle) {
+            FS_FCloseFile(stream->fileHandle);
+            stream->fileHandle = 0;
+        }
         stream->active = false;
     }
+
+    OAL_CLEAR_ERROR();
 
     char filename[128], realname[256];
     Com_GetSoundFileName(startAliasInfo->alias0, filename, 128);
@@ -573,6 +605,10 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo* startAliasInfo, int
     stream->isLooping = ((startAliasInfo->alias0->flags & 1) != 0);
     stream->isEOF = false;
 
+    // Ensure the hardware queue is completely empty before refilling
+    alSourcei(stream->source, AL_BUFFER, 0);
+    OAL_CLEAR_ERROR();
+
     // Initial Buffer Queueing
     for (int i = 0; i < NUM_STREAM_BUFFERS; i++) {
         int bytesPerFrame = (stream->format == AL_FORMAT_STEREO16 ? 4 : 2);
@@ -599,6 +635,7 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo* startAliasInfo, int
         int actualBytesRead = (int)(framesRead * bytesPerFrame);
         alBufferData(stream->buffers[i], stream->format, chunkBuffer, actualBytesRead, stream->rate);
         alSourceQueueBuffers(stream->source, 1, &stream->buffers[i]);
+        OAL_CHECK_ERROR();
     }
 
     // --- Spatialization support for Stream Channels ---
@@ -788,6 +825,8 @@ void __cdecl SND_UpdateEqs()
         }
         oalGlob.eqDirty[entchannel] = false;
     }
+
+    OAL_CHECK_ERROR();
 }
 
 
@@ -1357,6 +1396,7 @@ void __cdecl SND_UpdateStreamChannel(int i, int frametime)
                 int actualBytesRead = (int)(framesRead * bytesPerFrame);
                 alBufferData(bufferId, stream->format, chunkBuffer, actualBytesRead, stream->rate);
                 alSourceQueueBuffers(stream->source, 1, &bufferId);
+                OAL_CHECK_ERROR();
             }
             
             processed--;
