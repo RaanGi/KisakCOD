@@ -492,7 +492,7 @@ int __cdecl Actor_CanSeePointEx(
     if (!Actor_IsUsingTurret(self) || !turret_CanTargetPoint(self->pTurret, vPoint, v16, v15))
         Actor_GetEyePosition(self, v16);
 
-    return Actor_CanSeePointExInternal(self, vPoint, fovDot, fMaxDistSqrd, ignoreEntityNum, v16);// KISAKTODO double check args
+    return Actor_CanSeePointExInternal(self, vPoint, fovDot, fMaxDistSqrd, ignoreEntityNum, v16);
 }
 
 void __cdecl Actor_UpdateVisCache(actor_s *self, const gentity_s *ent, sentient_info_t *pInfo, bool bVisible)
@@ -529,8 +529,8 @@ int Actor_CanSeeEntityEx(actor_s *self, const gentity_s *ent, double fovDot, dou
     iassert(self);
     iassert(self->sentient);
     iassert(ent);
-    iassert(fovDot);
-    iassert(fMaxDistSqrd);
+    iassert(fovDot >= 0);
+    iassert(fMaxDistSqrd >= 0);
 
     sentient_s *targetSentient;
     float fMaxSightDistSqrd; // [esp+14h] [ebp-54h]

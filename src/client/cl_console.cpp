@@ -3104,17 +3104,14 @@ void __cdecl Con_DrawOutputVersion(float x, float y, float width, float height)
     char *VersionString; // [esp-8h] [ebp-Ch]
     float ya; // [esp+10h] [ebp+Ch]
 
-    ya = height - 16.0 + y;
+    ya = height - 1.0 + y;
     VersionString = Con_GetVersionString();
     SCR_DrawSmallStringExt((int)x, (int)ya, VersionString, con_versionColor);
 }
 
 char *__cdecl Con_GetVersionString()
 {
-    const char *BuildNumber; // eax
-
-    BuildNumber = getBuildNumber();
-    return va("Build %s %s", BuildNumber, "win-x86");
+	return va("Build %s %s", getBuildNumber(), CPUSTRING);
 }
 
 void __cdecl Con_PageUp()

@@ -31,7 +31,7 @@ constexpr auto MAX_FRIENDLY_DIST = 15000.0;
 #define WEAPONSTATE_RAISING(x) (x == WEAPON_RAISING || x == WEAPON_RAISING_ALTSWITCH)
 #define WEAPONSTATE_DROPPING(x) (x == WEAPON_DROPPING || x == WEAPON_DROPPING_QUICK)
 
-// Kiask: Custom enum
+// Kisak: Custom enum
 typedef enum {
     SND_MAX_ENTCHANNEL_NAMELENGTH = 0x40
 } sndEnumStuff;
@@ -802,6 +802,11 @@ enum pmflags_t : __int32 // (MP/SP same)
     PMF_NO_JUMP = 1 << 19,
 #ifdef KISAK_MP
     PMF_VEHICLE_ATTACHED = 1 << 20
+#elif KISAK_SP
+    PMF_SCRIPT_NO_STAND = 1 << 20,
+    PMF_SCRIPT_NO_CROUCH = 1 << 21,
+    PMF_SCRIPT_NO_PRONE = 1 << 22,
+    PMF_SCRIPT_NO_LEAN = 1 << 23
 #endif
 };
 
@@ -2262,6 +2267,11 @@ void __cdecl PM_Detonate(playerState_s *ps, int32_t delayedAction);
 void __cdecl PM_Weapon_CheckForNightVision(pmove_t *pm);
 void __cdecl PM_Weapon_FinishNightVisionWear(playerState_s *ps);
 void __cdecl PM_Weapon_FinishNightVisionRemove(playerState_s *ps);
+
+#ifdef KISAK_SP
+bool __cdecl ViewModelOverride(playerState_s *ps, pml_t *pml);
+#endif
+
 void __cdecl Sprint_State_Loop(playerState_s *ps);
 void __cdecl PM_Weapon_CheckForSprint(pmove_t *pm);
 void __cdecl Sprint_State_Raise(playerState_s *ps);

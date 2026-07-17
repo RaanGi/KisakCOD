@@ -64,7 +64,7 @@ struct CustomSearchInfo_FindPath
         return dist;
     }
 
-    bool IsGoal(pathnode_t *pCurrent)
+    bool IsGoal(pathnode_t *pCurrent, const float *) 
     {
         return pCurrent == m_pNodeTo;
     }
@@ -76,7 +76,10 @@ struct CustomSearchInfo_FindPathWithWidth
     float width;
     float perp[2];
 
-    bool IsGoal(pathnode_t *pCurrent) { return pCurrent == m_pNodeTo; }
+    bool IsGoal(pathnode_t *pCurrent, const float *) 
+    { 
+    	return pCurrent == m_pNodeTo; 
+    }
 
     float EvaluateHeuristic(pathnode_t *pSuccessor, const float *vGoalPos)
     {
@@ -169,6 +172,25 @@ struct  CustomSearchInfo_FindPathAway
         Vec3Sub(pSuccessor->constant.vOrigin, this->m_vAwayFromPos, diff);
         return this->m_fDistAway - (Vec3Length(diff));
     }
+
+
+    bool IsGoal(pathnode_t *pCurrent, const float *)
+    {
+        float dx = pCurrent->constant.vOrigin[0] - this->m_vAwayFromPos[0];
+        float dy = pCurrent->constant.vOrigin[1] - this->m_vAwayFromPos[1];
+        float dz = pCurrent->constant.vOrigin[2] - this->m_vAwayFromPos[2];
+        float distSq = (float)(dz * dz) + (float)((float)(dx * dx) + (float)(dy * dy));
+        if (distSq < this->m_fDistAwaySqrd)
+        {
+            if (distSq > this->m_fBestScore)
+            {
+                this->m_fBestScore = distSq;
+                this->m_pBestNode = pCurrent;
+            }
+            return false;
+        }
+        return true;
+    }
 };
 
 /* 10047 */
@@ -211,7 +233,15 @@ struct CustomSearchInfo_FindPathWithLOS
     float startPos[3];
     float negotiationOverlapCost;
 
-    bool IsGoal(pathnode_t *pCurrent) { return pCurrent == m_pNodeTo; }
+    bool IsGoal(pathnode_t *pCurrent, const float *vGoalPos)
+    {
+        float dx = pCurrent->constant.vOrigin[0] - vGoalPos[0];
+        float dy = pCurrent->constant.vOrigin[1] - vGoalPos[1];
+        float dz = pCurrent->constant.vOrigin[2] - vGoalPos[2];
+        float distSq = (float)(dz * dz) + (float)((float)(dx * dx) + (float)(dy * dy));
+
+        return distSq < this->m_fWithinDistSqrd && Path_NodesVisible(pCurrent, this->m_pNodeTo);
+    }
 
     float EvaluateHeuristic(pathnode_t *pSuccessor, const float *vGoalPos)
     {
@@ -235,6 +265,11 @@ struct CustomSearchInfo_FindPathWithLOS
 struct  CustomSearchInfo_FindPathInCylinderWithLOS : CustomSearchInfo_FindPathWithLOS
 {
     const actor_goal_s *goal;
+
+    bool IgnoreNode(pathnode_t *pNode)
+    {
+        return !Actor_PointAtGoal(pNode->constant.vOrigin, this->goal);
+    }
 
     float EvaluateHeuristic(pathnode_t *pSuccessor, const float *vGoalPos)
     {
@@ -313,17 +348,29 @@ struct  CustomSearchInfo_FindPathInCylinderWithLOSNotCrossPlanes : CustomSearchI
 /* 10051 */
 struct  CustomSearchInfo_FindPathFromInCylinder : CustomSearchInfo_FindPath
 {
-    float m_vOrigin[2];
+    float m_vOrigin[3];
     float m_fRadiusSqrd;
     float m_fHalfHeightSqrd;
 
     // inherits EvaluateHeuristic()
+
+    bool IgnoreNode(pathnode_t *pNode)
+    {
+        float dz = pNode->constant.vOrigin[2] - this->m_fRadiusSqrd;
+
+        if ((float)(dz * dz) > this->m_fHalfHeightSqrd)
+            return true;
+
+        float dx = pNode->constant.vOrigin[0] - this->m_vOrigin[0];
+        float dy = pNode->constant.vOrigin[1] - this->m_vOrigin[1];
+        return (float)((float)(dy * dy) + (float)(dx * dx)) > this->m_fRadiusSqrd;
+    }
 };
 
 /* 10052 */
 struct  CustomSearchInfo_FindPathFromInCylinderNotCrossPlanes : CustomSearchInfo_FindPath
 {
-    float m_vOrigin[2];
+    float m_vOrigin[3];
     float m_fRadiusSqrd;
     float m_fHalfHeightSqrd;
     int m_iPlaneCount;
@@ -342,7 +389,7 @@ struct  CustomSearchInfo_FindPathFromInCylinderNotCrossPlanes : CustomSearchInfo
         float *fDist; // r10
         float *i; // r11
 
-        v2 = (float)(pNode->constant.vOrigin[2] - this->m_fRadiusSqrd);
+        v2 = (float)(pNode->constant.vOrigin[2] - this->m_vOrigin[2]);
         if ((float)((float)v2 * (float)v2) > (double)this->m_fHalfHeightSqrd)
             return 1;
         v4 = (float)(pNode->constant.vOrigin[0] - this->m_vOrigin[0]);
@@ -381,7 +428,7 @@ struct CustomSearchInfo_CouldAttack
     }
 
 
-    bool IsGoal(pathnode_t *pCurrent)
+    bool IsGoal(pathnode_t *pCurrent, const float *)
     {
         if (Path_NodesVisible(pCurrent, m_pNodeTo))
         {
@@ -400,7 +447,25 @@ struct  CustomSearchInfo_FindPathClosestPossible
     pathnode_t *m_pNodeTo;
     float negotiationOverlapCost;
 
-    bool IsGoal(pathnode_t *pCurrent) { return pCurrent == m_pNodeTo; }
+
+    bool IsGoal(pathnode_t *pCurrent, const float *)
+    {
+        if (pCurrent == m_pNodeTo)
+        {
+            m_pBestNode = m_pNodeTo;
+            return true;
+        }
+        float dx = pCurrent->constant.vOrigin[0] - m_pNodeTo->constant.vOrigin[0];
+        float dy = pCurrent->constant.vOrigin[1] - m_pNodeTo->constant.vOrigin[1];
+        float dz = pCurrent->constant.vOrigin[2] - m_pNodeTo->constant.vOrigin[2];
+        float distSq = (float)(dz * dz) + (float)((float)(dx * dx) + (float)(dy * dy));
+        if (distSq < this->m_fBestScore)
+        {
+            this->m_fBestScore = distSq;
+            this->m_pBestNode = pCurrent;
+        }
+        return false;
+    }
 
     float EvaluateHeuristic(pathnode_t *pSuccessor, const float *vGoalPos)
     {
@@ -1187,6 +1252,8 @@ void __cdecl Path_IncreaseLookaheadAmount(path_t *pPath)
 
     pPath->fLookaheadAmount *= 1.1764705f;
 
+    // LWSS: this is not needed atm, it's some kind of lookahead exponential growth that pushes the amount further, much faster. 
+    // I'm guessing for moving straight across giant levels. (Notably disabled in Zombie mode)
     //if (ai_useBetterLookahead->current.enabled && !zombiemode->current.enabled)
     //{
     //    v3 = _Pow_int<float>(momentumFactor, pPath->numIncreases - 1);
@@ -1251,12 +1318,12 @@ bool __cdecl Path_PredictionTrace(
 
         if (trace.fraction < 0.0001) // blops fix
         {
-            break;
+            return 0;
         }
 
         if (trace.startsolid && !allowStartSolid)
         {
-            break;
+            return 0;
         }
 
         if (!trace.allsolid && trace.fraction == 1.0f)
@@ -1280,7 +1347,7 @@ bool __cdecl Path_PredictionTrace(
             if (vTraceEndPos[2] < vSource[2] || trace.fraction == 1.0 || trace.normal[2] >= 0.7f)
             {
                 vTraceEndPos[2] += stepheight;
-                return I_fabs(((vTraceEndPos[2] + stepheight) - vEndPos[2])) < 72.0f;
+                return I_fabs(vTraceEndPos[2] - vEndPos[2]) < 72.0f;
             }
             else
             {
@@ -1587,8 +1654,8 @@ void __cdecl Path_TrimCompletedPath(path_t *pPath, const float *vStartPos)
         d1 = (float)((float)(pPath->lookaheadDir[1] * (float)(vCurrPoint->vOrigPoint[1] - vStartPos[1]))
             + (float)((float)(vCurrPoint->vOrigPoint[0] - *vStartPos) * pPath->lookaheadDir[0]))
             - (float)0.000099999997;
-        iassert(d1);
-        iassert(d2);
+        iassert(d1 <= 0);
+        iassert(d2 > 0);
         iassert(d1 - d2 < 0);
         fraction = (float)(d1 / (float)(d1 - d2));
         iassert(fraction >= 0);
@@ -2309,87 +2376,53 @@ void __cdecl Path_UpdateForwardLookahead(path_t *pPath, const float *vStartPos)
 
 void __cdecl Path_DebugDraw(path_t *pPath, float *vStartPos, int bDrawLookahead)
 {
-    float fLookaheadDist; // fp0
-    double v6; // fp10
-    double v7; // fp13
-    double v8; // fp9
-    double v9; // fp7
-    double v10; // fp11
-    __int16 wPathLen; // r11
-    int v12; // r29
-    double v13; // fp0
-    int v14; // r30
-    int wNegotiationStartNode; // r11
-    double v16; // fp0
-    const float *v17; // r5
-    float *v18; // r29
-    int v19; // r11
-    const float *v20; // r5
-    // KISAKFIX: IDA had v21/v22/v23 at sp+0x50/0x54/0x58 (end vec3) and v24/v25/v26 at
-    // sp+0x60/0x64/0x68 (start vec3). Passed as &v24 / &v21 to G_DebugLine expecting float[3].
-    // Pack into arrays.
-    float endPt[3];   // was v21 (BYREF) + v22 + v23
-    float startPt[3]; // was v24 (BYREF) + v25 + v26
+    float startPt[3];
+    float endPt[3];
+    const float *color;
+    int i;
 
-    if (pPath->wPathLen)
+    if (!pPath->wPathLen)
+        return;
+
+    if (bDrawLookahead)
     {
-        if (bDrawLookahead)
-        {
-            fLookaheadDist = pPath->fLookaheadDist;
-            v6 = (float)(pPath->lookaheadDir[2] * pPath->fLookaheadDist);
-            v7 = vStartPos[2];
-            v8 = pPath->lookaheadDir[0];
-            v9 = pPath->lookaheadDir[1];
-            v10 = vStartPos[1];
-            startPt[0] = *vStartPos;
-            startPt[1] = v10;
-            endPt[0] = startPt[0] + (float)((float)v8 * (float)fLookaheadDist);
-            endPt[1] = (float)v10 + (float)((float)v9 * (float)fLookaheadDist);
-            startPt[2] = (float)v7 + (float)16.0;
-            endPt[2] = (float)((float)v7 + (float)v6) + (float)16.0;
-            G_DebugLine(startPt, endPt, colorRed, 0);
-        }
-        wPathLen = pPath->wPathLen;
-        startPt[2] = vStartPos[2] + (float)16.0;
-        v12 = wPathLen;
-        v13 = vStartPos[1];
-        startPt[0] = *vStartPos;
-        startPt[1] = v13;
-        if (!wPathLen)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 3615, 0, "%s", "i");
-        v14 = v12 - 1;
-        wNegotiationStartNode = pPath->wNegotiationStartNode;
-        endPt[2] = pPath->vCurrPoint[2] + (float)16.0;
-        v16 = pPath->vCurrPoint[1];
-        endPt[0] = pPath->vCurrPoint[0];
-        endPt[1] = v16;
-        v17 = colorBlue;
-        if (v12 - 1 == wNegotiationStartNode - 1)
-            v17 = colorCyan;
-        G_DebugLine(startPt, endPt, v17, 0);
-        startPt[0] = endPt[0];
-        startPt[1] = endPt[1];
-        startPt[2] = endPt[2];
-        if (v12 != 1)
-        {
-            v18 = &pPath->pts[v14].vOrigPoint[2];
-            do
-            {
-                v18 -= 7;
-                --v14;
-                v19 = pPath->wNegotiationStartNode - 1;
-                endPt[0] = *(v18 - 2);
-                endPt[1] = *(v18 - 1);
-                v20 = colorBlue;
-                endPt[2] = *v18 + (float)16.0;
-                if (v14 == v19)
-                    v20 = colorCyan;
-                G_DebugLine(startPt, endPt, v20, 0);
-                startPt[0] = endPt[0];
-                startPt[1] = endPt[1];
-                startPt[2] = endPt[2];
-            } while (v14);
-        }
+        startPt[0] = vStartPos[0];
+        startPt[1] = vStartPos[1];
+        startPt[2] = vStartPos[2] + 16.0f;
+        endPt[0] = vStartPos[0] + (pPath->lookaheadDir[0] * pPath->fLookaheadDist);
+        endPt[1] = vStartPos[1] + (pPath->lookaheadDir[1] * pPath->fLookaheadDist);
+        endPt[2] = vStartPos[2] + (pPath->lookaheadDir[2] * pPath->fLookaheadDist) + 16.0f;
+        G_DebugLine(startPt, endPt, colorRed, 0);
+    }
+
+    i = pPath->wPathLen;
+    iassert(i);
+
+    startPt[0] = vStartPos[0];
+    startPt[1] = vStartPos[1];
+    startPt[2] = vStartPos[2] + 16.0f;
+
+    --i;
+    endPt[0] = pPath->vCurrPoint[0];
+    endPt[1] = pPath->vCurrPoint[1];
+    endPt[2] = pPath->vCurrPoint[2] + 16.0f;
+
+    color = (i == pPath->wNegotiationStartNode - 1) ? colorCyan : colorBlue;
+    G_DebugLine(startPt, endPt, color, 0);
+
+    Vec3Copy(endPt, startPt);
+
+    while (i)
+    {
+        --i;
+        endPt[0] = pPath->pts[i].vOrigPoint[0];
+        endPt[1] = pPath->pts[i].vOrigPoint[1];
+        endPt[2] = pPath->pts[i].vOrigPoint[2] + 16.0f;
+
+        color = (i == pPath->wNegotiationStartNode - 1) ? colorCyan : colorBlue;
+        G_DebugLine(startPt, endPt, color, 0);
+
+        Vec3Copy(endPt, startPt);
     }
 }
 
@@ -2771,7 +2804,7 @@ LABEL_12:
 
     if constexpr (CHECK_NODETO)
     {
-        nodeToCheck = !custom->IsGoal(pCurrent);
+        nodeToCheck = !custom->IsGoal(pCurrent, vGoalPos);
     }
 
     if (nodeToCheck)
@@ -3286,96 +3319,60 @@ bool __cdecl Path_LookaheadPredictionTrace(path_t *pPath, float *vStartPos, floa
     return Path_PredictionTrace(vStartPos, vEndPos, ENTITYNUM_NONE, mask, endpos, 18.0, 1);
 }
 
+static const float minLookaheadDist = 24.0f; // USEBETTERLOOKAHEAD
+
 void __cdecl Path_UpdateLookaheadAmount(
     path_t *pPath,
     float *vStartPos,
     float *vLookaheadPos,
     int bReduceLookaheadAmount,
-    double dist,
+    float dist,
     int lookaheadNextNode,
-    double maxLookaheadAmountIfReduce)
+    float maxLookaheadAmountIfReduce,
+    bool bAllowRestore) // USEBETTERLOOKAHEAD
 {
-    int v15; // r11
     int flags; // r10
-    double v17; // fp0
-    double v18; // fp0
-    int v19; // r9
-    int v20; // r11
     float fOrigLength; // fp0
-    int v22; // r4
-    double v23; // fp1
-    double v24; // fp0
-    int wPathLen; // r11
     float fCurrLength; // fp1
-    double v28; // fp2
-    const char *v29; // r3
+    float prevLength;
+    float prevHeight;
+    float prevLookaheadAmount;
+    bool restorePrevLookahead;
+    bool lookaheadTrace;
+    bool bNewIsForward;
+    float prevLookaheadPos[3];
+    pathpoint_t *nextPathPt;
+    pathpoint_t *prevPathPt;
 
-    if (pPath->wPathLen <= 0)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp", 2716, 0, "%s", "pPath->wPathLen > 0");
-    v15 = pPath->wPathLen - 1;
-    if (pPath->lookaheadNextNode >= v15)
+    iassert(pPath->wPathLen > 0);
+
+    if (pPath->lookaheadNextNode >= pPath->wPathLen - 1)
     {
         pPath->fLookaheadDistToNextNode = 0.0;
-        pPath->lookaheadNextNode = v15;
+        pPath->lookaheadNextNode = pPath->wPathLen - 1;
     }
+
+    // USEBETTERLOOKAHEAD
+    prevLength = 0.0f;
+    prevHeight = 0.0f;
+    prevLookaheadAmount = pPath->fLookaheadAmount;
+    restorePrevLookahead = false;
+    lookaheadTrace = false;
+    // END USEBETTERLOOKAHEAD
+
     if (bReduceLookaheadAmount)
     {
         flags = pPath->flags;
         if ((flags & 2) != 0)
-            v17 = 0.75;
+            pPath->fLookaheadAmount = (maxLookaheadAmountIfReduce * 0.75f);
         else
-            v17 = 0.5625;
-        v18 = (float)((float)maxLookaheadAmountIfReduce * (float)v17);
-        pPath->fLookaheadAmount = v18;
-        if (v18 < 0.001)
+            pPath->fLookaheadAmount = (maxLookaheadAmountIfReduce * 0.5625f);
+
+        if (pPath->fLookaheadAmount < 0.001)
             pPath->fLookaheadAmount = 0.001;
+
         pPath->flags = flags & 0xFFFFFDFC;
-    LABEL_28:
-        pPath->lookaheadDir[0] = *vLookaheadPos - *vStartPos;
-        pPath->lookaheadDir[1] = vLookaheadPos[1] - vStartPos[1];
-        pPath->lookaheadDir[2] = vLookaheadPos[2] - vStartPos[2];
-        v23 = Vec2Normalize(pPath->lookaheadDir);
-        pPath->fLookaheadDist = v23;
-        if (v23 == 0.0)
-            v24 = 0.0;
-        else
-            v24 = (float)(pPath->lookaheadDir[2] / (float)v23);
-        pPath->lookaheadDir[2] = v24;
-        pPath->fLookaheadDistToNextNode = dist;
-        pPath->lookaheadNextNode = lookaheadNextNode;
-
-        iassert(pPath->wNegotiationStartNode <= pPath->lookaheadNextNode);
-        iassert(pPath->lookaheadNextNode < pPath->wPathLen);
-        iassert(pPath->pts[pPath->lookaheadNextNode].fOrigLength > 0);
-        iassert(pPath->fLookaheadDistToNextNode <= pPath->pts[pPath->lookaheadNextNode].fOrigLength);
-
-        wPathLen = pPath->wPathLen;
-        if (wPathLen > 1)
-        {
-            fCurrLength = pPath->fCurrLength;
-            v28 = *((float *)&pPath->pts[wPathLen - 1] - 2);
-            if (fCurrLength > v28)
-            {
-                v29 = va((const char *)HIDWORD(fCurrLength), LODWORD(fCurrLength), LODWORD(v28));
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-                    2762,
-                    0,
-                    "%s\n\t%s",
-                    "pPath->wPathLen <= 1 || pPath->fCurrLength <= pPath->pts[pPath->wPathLen - 2].fOrigLength",
-                    v29);
-            }
-        }
-
-        iassert(!pPath->fLookaheadDistToNextNode || (pPath->lookaheadNextNode < pPath->wPathLen - 1));
-        iassert(pPath->lookaheadNextNode < pPath->wPathLen);
-
-        if (pPath->fLookaheadDistToNextNode != 0.0 && pPath->lookaheadNextNode >= pPath->wPathLen - 1)
-        {
-            v22 = 2765;
-            goto LABEL_50;
-        }
-        return;
+        goto LABEL_28;
     }
     if (Path_LookaheadPredictionTrace(pPath, vStartPos, vLookaheadPos))
     {
@@ -3383,37 +3380,107 @@ void __cdecl Path_UpdateLookaheadAmount(
         goto LABEL_28;
     }
     iassert(pPath->lookaheadNextNode >= 0);
-    v19 = pPath->wPathLen;
-    v20 = pPath->lookaheadNextNode;
-    if (v20 == v19 - 2)
+
+    if (pPath->lookaheadNextNode == pPath->wPathLen - 2)
         fOrigLength = pPath->fCurrLength;
     else
-        fOrigLength = pPath->pts[v20].fOrigLength;
-    if ((pPath->flags & 2) == 0 || v20 >= v19 || pPath->fLookaheadDistToNextNode > fOrigLength)
+        fOrigLength = pPath->pts[pPath->lookaheadNextNode].fOrigLength;
+
+    if ((pPath->flags & 2) == 0 || pPath->lookaheadNextNode >= pPath->wPathLen || pPath->fLookaheadDistToNextNode > fOrigLength)
     {
         Path_ReduceLookaheadAmount(pPath, maxLookaheadAmountIfReduce);
         goto LABEL_28;
     }
+
     Path_ReduceLookaheadAmount(pPath, maxLookaheadAmountIfReduce);
     iassert(pPath->lookaheadNextNode < pPath->wPathLen);
-    if (pPath->fLookaheadDistToNextNode != 0.0 && pPath->lookaheadNextNode >= pPath->wPathLen - 1)
+    iassert(!pPath->fLookaheadDistToNextNode || (pPath->lookaheadNextNode < pPath->wPathLen - 1));
+    return;
+
+LABEL_28:
+    // USEBETTERLOOKAHEAD
+    bNewIsForward = lookaheadNextNode > pPath->lookaheadNextNode || (lookaheadNextNode == pPath->lookaheadNextNode && dist > pPath->fLookaheadDistToNextNode);
+
+    if (ai_useBetterLookahead->current.enabled
+        && bAllowRestore
+        && (prevLookaheadAmount > pPath->fLookaheadAmount || bNewIsForward)
+        && pPath->lookaheadNextNode <= pPath->wPathLen - 2
+        && pPath->pts[pPath->lookaheadNextNode].fOrigLength >= pPath->fLookaheadDistToNextNode
+        && pPath->wNegotiationStartNode <= 0
+        && pPath->fLookaheadDist > minLookaheadDist)
     {
-        v22 = 2739;
-    LABEL_50:
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
-            v22,
-            0,
-            "%s",
-            "!pPath->fLookaheadDistToNextNode || (pPath->lookaheadNextNode < pPath->wPathLen - 1)");
+        nextPathPt = &pPath->pts[pPath->lookaheadNextNode];
+        prevPathPt = &pPath->pts[pPath->lookaheadNextNode + 1];
+        prevHeight = Path_GetDistToPathSegment(vStartPos, nextPathPt);
+        if (pPath->lookaheadNextNode == pPath->wPathLen - 2)
+            fOrigLength = pPath->fCurrLength;
+        else
+            fOrigLength = nextPathPt->fOrigLength;
+        prevLength = fOrigLength;
+        prevLookaheadPos[0] = (float)((float)-pPath->fLookaheadDistToNextNode * nextPathPt->fDir2D[0]) + nextPathPt->vOrigPoint[0];
+        prevLookaheadPos[1] = (float)((float)-pPath->fLookaheadDistToNextNode * nextPathPt->fDir2D[1]) + nextPathPt->vOrigPoint[1];
+        prevLookaheadPos[2] = nextPathPt->vOrigPoint[2]
+            - (((nextPathPt->vOrigPoint[2] - prevPathPt->vOrigPoint[2]) * pPath->fLookaheadDistToNextNode) / fOrigLength);
+        lookaheadTrace = Path_LookaheadPredictionTrace(pPath, vStartPos, prevLookaheadPos);
+        if (pPath->fLookaheadAmount < prevLookaheadAmount)
+        {
+            if (!lookaheadTrace)
+            {
+                Path_SetLookaheadToStart(pPath, vStartPos, 0);
+                return;
+            }
+            restorePrevLookahead = true;
+        }
+        else
+        {
+            restorePrevLookahead = lookaheadTrace;
+        }
     }
+    if (restorePrevLookahead)
+    {
+        Vec3Sub(prevLookaheadPos, vStartPos, pPath->lookaheadDir);
+
+        pPath->fLookaheadDist = Vec2Normalize(pPath->lookaheadDir);
+
+        if (pPath->fLookaheadDist == 0.0)
+            pPath->lookaheadDir[2] = 0.0;
+        else
+            pPath->lookaheadDir[2] = (pPath->lookaheadDir[2] / pPath->fLookaheadDist);
+
+        if (pPath->lookaheadNextNode != lookaheadNextNode || pPath->fLookaheadAmount >= prevLookaheadAmount)
+            pPath->fLookaheadAmount = (prevHeight * prevLength);
+    }
+    else
+    {
+        Vec3Sub(vLookaheadPos, vStartPos, pPath->lookaheadDir);
+
+        pPath->fLookaheadDist = Vec2Normalize(pPath->lookaheadDir);
+
+        if (pPath->fLookaheadDist == 0.0)
+            pPath->lookaheadDir[2] = 0.0;
+        else
+            pPath->lookaheadDir[2] = (float)(pPath->lookaheadDir[2] / pPath->fLookaheadDist);
+
+        pPath->fLookaheadDistToNextNode = dist;
+        pPath->lookaheadNextNode = lookaheadNextNode;
+    }
+    // END USEBETTERLOOKAHEAD
+
+    iassert(pPath->wNegotiationStartNode <= pPath->lookaheadNextNode);
+    iassert(pPath->lookaheadNextNode < pPath->wPathLen);
+    iassert(pPath->pts[pPath->lookaheadNextNode].fOrigLength > 0);
+    iassert(pPath->fLookaheadDistToNextNode <= pPath->pts[pPath->lookaheadNextNode].fOrigLength);
+    iassert(pPath->wPathLen <= 1 || pPath->fCurrLength <= pPath->pts[pPath->wPathLen - 2].fOrigLength);
+    iassert(!pPath->fLookaheadDistToNextNode || (pPath->lookaheadNextNode < pPath->wPathLen - 1));
+    iassert(pPath->lookaheadNextNode < pPath->wPathLen);
 }
 
 void __cdecl Path_CalcLookahead_Completed(
     path_t *pPath,
     float *vStartPos,
     int bReduceLookaheadAmount,
-    double totalArea)
+    float totalArea,
+    bool bAllowRestore) // USEBETTERLOOKAHEAD
 {
     float *vLookaheadPos;
 
@@ -3433,12 +3500,13 @@ void __cdecl Path_CalcLookahead_Completed(
         bReduceLookaheadAmount,
         0.0,
         pPath->wNegotiationStartNode,
-        totalArea);
+        totalArea,
+        bAllowRestore); // USEBETTERLOOKAHEAD
 
     pPath->fLookaheadAmount = fmaxf(pPath->fLookaheadAmount, fmaxf(totalArea, 32768.0f));
 }
 
-void __cdecl Path_CalcLookahead(path_t *pPath, float *vStartPos, int bReduceLookaheadAmount)
+void __cdecl Path_CalcLookahead(path_t *pPath, float *vStartPos, int bReduceLookaheadAmount, bool bAllowRestore) // USEBETTERLOOKAHEAD
 {
     pathpoint_t *vCurrPoint; // [esp+10h] [ebp-58h]
     float fCurrLength; // [esp+14h] [ebp-54h]
@@ -3470,7 +3538,7 @@ void __cdecl Path_CalcLookahead(path_t *pPath, float *vStartPos, int bReduceLook
     {
         if (i < pPath->wNegotiationStartNode)
         {
-            Path_CalcLookahead_Completed(pPath, vStartPos, bReduceLookaheadAmount, totalArea);
+            Path_CalcLookahead_Completed(pPath, vStartPos, bReduceLookaheadAmount, totalArea, bAllowRestore); // USEBETTERLOOKAHEAD
             return;
         }
         pt = &pPath->pts[i];
@@ -3512,7 +3580,8 @@ void __cdecl Path_CalcLookahead(path_t *pPath, float *vStartPos, int bReduceLook
         bReduceLookaheadAmount,
         dist,
         i,
-        lookaheadAmount
+        lookaheadAmount,
+        bAllowRestore // USEBETTERLOOKAHEAD
         );
 }
 
@@ -3599,13 +3668,14 @@ pathnode_t *__cdecl Path_FindPathFrom(
     pathnode_t *pNodeFrom,
     float *vStartPos,
     const float *vGoalPos,
+	float fMaxNodeDist,
     bool bAllowNegotiationLinks)
 {
     pathnode_t *result; // r3
     int nodeCount;
     pathsort_t v14[64];
 
-    result = Path_NearestNode(vGoalPos, v14, -2, 192.0f, &nodeCount, 64, NEAREST_NODE_DO_HEIGHT_CHECK);
+    result = Path_NearestNode(vGoalPos, v14, -2, fMaxNodeDist, &nodeCount, 64, NEAREST_NODE_DO_HEIGHT_CHECK);
     if (result)
         return (pathnode_t *)Path_FindPathFromTo(
             pPath,
@@ -3623,7 +3693,8 @@ void __cdecl Path_UpdateLookahead(
     float *vStartPos,
     bool bReduceLookaheadAmount,
     bool bTrimAmount,
-    bool bAllowBacktrack)
+    bool bAllowBacktrack,
+    bool bAllowRestore) // USEBETTERLOOKAHEAD
 {
     int v10; // r7
     int v11; // r6
@@ -3702,7 +3773,7 @@ void __cdecl Path_UpdateLookahead(
         if (bAllowBacktrack && pPath->fLookaheadAmount >= 64.0)
             Path_BacktrackCompletedPath(pPath, vStartPos);
     LABEL_20:
-        Path_CalcLookahead(pPath, vStartPos, bReduceLookaheadAmount);
+        Path_CalcLookahead(pPath, vStartPos, bReduceLookaheadAmount, bAllowRestore); // USEBETTERLOOKAHEAD
         goto LABEL_25;
     }
     v18 = Path_NeedsReevaluation(pPath);
@@ -3718,7 +3789,7 @@ void __cdecl Path_UpdateLookahead(
     if (!bTrimAmount)
         goto LABEL_20;
     Path_SubtractTrimmedAmount(pPath, vStartPos);
-    Path_CalcLookahead(pPath, vStartPos, bReduceLookaheadAmount);
+    Path_CalcLookahead(pPath, vStartPos, bReduceLookaheadAmount, bAllowRestore); // USEBETTERLOOKAHEAD
 LABEL_25:
     Path_UpdateForwardLookahead(pPath, vStartPos);
     //Profile_EndInternal(0);
@@ -3747,7 +3818,13 @@ void __cdecl Path_SetLookaheadToStart(path_t *pPath, float *vStartPos, int bTrim
     pPath->lookaheadDir[2] = v9;
     pPath->fLookaheadDistToNextNode = 0.0;
     pPath->lookaheadNextNode = wPathLen - 1;
-    Path_UpdateLookahead(pPath, vStartPos, 0, bTrimAmount, 1);
+    // USEBETTERLOOKAHEAD
+    int numIter = 1;
+    if (ai_useBetterLookahead->current.enabled)
+        numIter = 3;
+    for (int i = 0; i < numIter; ++i)
+        Path_UpdateLookahead(pPath, vStartPos, 0, bTrimAmount, 1, 0);
+    // END USEBETTERLOOKAHEAD
 }
 
 void __cdecl Path_TransferLookahead(path_t *pPath, float *vStartPos)
@@ -3831,7 +3908,7 @@ void __cdecl Path_TransferLookahead(path_t *pPath, float *vStartPos)
 
         if (bInFront && (float)(dot * prevDot) < 0.0)
         {
-            Path_UpdateLookahead(pPath, vStartPos, 0, 1, 1);
+            Path_UpdateLookahead(pPath, vStartPos, 0, 1, 1, 0); // USEBETTERLOOKAHEAD
             return;
         }
 
@@ -3851,8 +3928,8 @@ void __cdecl Path_TransferLookahead(path_t *pPath, float *vStartPos)
 
             iassert(pt->fDir2D[0] || pt->fDir2D[1]);
 
-            offset[0] = (-dist * pt->fDir2D[0]) + pt->vOrigPoint[0];
-            offset[1] = (-dist * pt->fDir2D[1]) + pt->vOrigPoint[1];
+            offset[0] = ((-dist * pt->fDir2D[0]) + pt->vOrigPoint[0]) - vStartPos[0];
+            offset[1] = ((-dist * pt->fDir2D[1]) + pt->vOrigPoint[1]) - vStartPos[1];
             Vec2Normalize(offset);
 
             float forwardDot = (vDir[0] * offset[0]) + (vDir[1] * offset[1]);
@@ -4132,7 +4209,7 @@ LABEL_18:
             pPath->lookaheadDir[0] = 0.0;
             pPath->lookaheadDir[1] = 0.0;
             pPath->lookaheadDir[2] = 0.0;
-            Path_UpdateLookahead(pPath, vStartPos, 0, 0, 1);
+            Path_UpdateLookahead(pPath, vStartPos, 0, 0, 1, 0); // USEBETTERLOOKAHEAD
             pPath->minLookAheadNodes = 0;
         }
         else
@@ -4247,7 +4324,7 @@ LABEL_16:
 
     pPath->fLookaheadAmount = fmaxf(pPath->fLookaheadAmount, 1024.0f);
 
-    Path_UpdateLookahead(pPath, vStartPos, 0, 0, 0);
+    Path_UpdateLookahead(pPath, vStartPos, 0, 0, 0, 1); // USEBETTERLOOKAHEAD
 }
 
 int __cdecl Path_AttemptDodge(
@@ -4377,8 +4454,7 @@ int __cdecl Path_AttemptDodge(
                 lookaheadNextNode = pPath->lookaheadNextNode;
                 wNegotiationStartNode = (unsigned __int16)pPath->wNegotiationStartNode;
 
-                //v48 = lookaheadNextNode;
-                //a20 = lookaheadNextNode;
+                startIndex = lookaheadNextNode;
                 iassert(pPath->wNegotiationStartNode >= 0);
                 iassert(pPath->wNegotiationStartNode <= startIndex);
                 iassert(startIndex < pPath->wPathLen - 1);
@@ -4701,7 +4777,7 @@ bool __cdecl Path_FindPathFromToNotCrossPlanes(
     }
     else
     {
-        return Path_AStarAlgorithm<CustomSearchInfo_FindPathNotCrossPlanes>(
+        return Path_AStarAlgorithm<CustomSearchInfo_FindPathNotCrossPlanes, true>(
             pPath,
             eTeam,
             vStartPos,
@@ -4740,7 +4816,7 @@ bool __cdecl Path_FindPathFromAway(
             * (float)(info.m_vAwayFromPos[0] - (float)vStartPos[0]))
             + (float)((float)(vAwayFromPos[2] - vStartPos[2]) * (float)(vAwayFromPos[2] - vStartPos[2])));
 
-    if (Path_AStarAlgorithm<CustomSearchInfo_FindPathAway, false, false>(pPath, eTeam, vStartPos, pNodeFrom, 0, 0, bAllowNegotiationLinks, &info))
+    if (Path_AStarAlgorithm<CustomSearchInfo_FindPathAway, false, true>(pPath, eTeam, vStartPos, pNodeFrom, 0, 0, bAllowNegotiationLinks, &info))
         return 1;
 
     m_pBestNode = info.m_pBestNode;
@@ -4793,7 +4869,7 @@ bool __cdecl Path_FindPathFromAwayNotCrossPlanes(
     if (info.IgnoreNode(pNodeFrom))
         return 0;
 
-    if (Path_AStarAlgorithm<CustomSearchInfo_FindPathAwayNotCrossPlanes, false, false>(
+    if (Path_AStarAlgorithm<CustomSearchInfo_FindPathAwayNotCrossPlanes, true, true>(
         pPath,
         eTeam,
         vStartPos,
@@ -4854,7 +4930,7 @@ bool __cdecl Path_FindPathInCylinderWithLOS(
     info.m_fWithinDistSqrd = fWithinDistSqrd;
     info.goal = goal;
 
-    return Path_AStarAlgorithm<CustomSearchInfo_FindPathInCylinderWithLOS>(
+    return Path_AStarAlgorithm<CustomSearchInfo_FindPathInCylinderWithLOS, true>(
         pPath,
         eTeam,
         vStartPos,
@@ -4913,7 +4989,7 @@ bool __cdecl Path_FindPathInCylinderWithLOSNotCrossPlanes(
     info.m_vNormal = vNormal;
     info.m_fDist = fDist;
 
-    return Path_AStarAlgorithm<CustomSearchInfo_FindPathInCylinderWithLOSNotCrossPlanes>(
+    return Path_AStarAlgorithm<CustomSearchInfo_FindPathInCylinderWithLOSNotCrossPlanes, true>(
         pPath,
         eTeam,
         vStartPos,
@@ -4948,6 +5024,7 @@ bool __cdecl Path_FindPathFromInCylinder(
     {
         info.m_vOrigin[0] = vOrigin[0];
         info.m_vOrigin[1] = vOrigin[1];
+		info.m_vOrigin[2] = vOrigin[2];
 
         info.startPos[0] = vStartPos[0];
         info.startPos[1] = vStartPos[1];
@@ -4957,7 +5034,7 @@ bool __cdecl Path_FindPathFromInCylinder(
         info.m_fRadiusSqrd = fRadiusSqrd;
         info.m_fHalfHeightSqrd = fHalfHeightSqrd;
 
-        return Path_AStarAlgorithm<CustomSearchInfo_FindPathFromInCylinder>(
+        return Path_AStarAlgorithm<CustomSearchInfo_FindPathFromInCylinder, true>(
             pPath,
             eTeam,
             vStartPos,
@@ -5002,6 +5079,7 @@ int __cdecl Path_FindPathFromInCylinderNotCrossPlanes(
 
     info.m_vOrigin[0] = vOrigin[0];
     info.m_vOrigin[1] = vOrigin[1];
+	info.m_vOrigin[2] = vOrigin[2];
     info.m_pNodeTo = pNodeTo;
     info.m_iPlaneCount = iPlaneCount;
     info.m_vNormal = vNormal;
@@ -5015,7 +5093,7 @@ int __cdecl Path_FindPathFromInCylinderNotCrossPlanes(
     if (info.IgnoreNode(pNodeFrom))
         return 0;
     else
-        return Path_AStarAlgorithm<CustomSearchInfo_FindPathFromInCylinderNotCrossPlanes>(
+        return Path_AStarAlgorithm<CustomSearchInfo_FindPathFromInCylinderNotCrossPlanes, true>(
             pPath,
             eTeam,
             vStartPos,
@@ -5298,7 +5376,7 @@ pathnode_t *__cdecl Path_FindPathAwayNotCrossPlanes(
         nodes,
         -2,
         192.0,
-        0,
+        vNormal,
         fDist,
         iPlaneCount,
         &nodeCount,

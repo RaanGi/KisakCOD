@@ -538,8 +538,8 @@ void __cdecl Actor_UpdateDesiredChainPosInternal(
     sentient_s *pGoalSentient);
 void __cdecl Actor_UpdateDesiredChainPos(actor_s *self);
 void __cdecl Actor_CheckOverridePos(actor_s *self, const float *prevGoalPos);
-void __cdecl Actor_SetGoalRadius(actor_goal_s *goal, double radius);
-void __cdecl Actor_SetGoalHeight(actor_goal_s *goal, double height);
+void Actor_SetGoalRadius(actor_goal_s *goal, float radius);
+void Actor_SetGoalHeight(actor_goal_s *goal, float height);
 bool __cdecl Actor_IsInsideArc(
     actor_s *self,
     const float *origin,
@@ -597,6 +597,7 @@ void __cdecl Actor_FindPathAwayNotCrossPlanes(
     float fMinSafeDist,
     float *normal,
     float dist,
+    int bUseSuppressionPlanes,
     int bAllowNegotiationLinks);
 void __cdecl Actor_BadPlacesChanged();
 void __cdecl Actor_UpdateAnglesAndDelta(actor_s *self);
